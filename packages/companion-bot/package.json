@@ -1,0 +1,22 @@
+{
+  "name": "@mms3-ask-bot/companion-bot",
+  "version": "1.0.0",
+  "description": "Companion bot for manager assistance in chat3/mms3",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "@mobilon-dev/gigachat-api-client": "^0.0.2",
+    "@mms3-ask-bot/shared": "*",
+    "amqplib": "^0.10.3",
+    "axios": "^1.13.2",
+    "chat3-client": "^0.0.22",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

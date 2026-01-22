@@ -1,0 +1,33 @@
+{
+  "name": "mms3-ask-bot",
+  "version": "1.0.0",
+  "description": "GigaChat AI bot for mms3/chat3 document processing and Q&A",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "start:user-bot": "npm run start --workspace=packages/user-bot",
+    "start:companion-bot": "npm run start --workspace=packages/companion-bot",
+    "start:data-backend": "npm run start --workspace=packages/data-backend",
+    "start:manager-backend": "npm run start --workspace=packages/manager-backend",
+    "start:all": "concurrently \"npm run start:companion-bot\" \"npm run start:data-backend\" \"npm run start:manager-backend\"",
+    "dev:user-bot": "npm run dev --workspace=packages/user-bot",
+    "dev:companion-bot": "npm run dev --workspace=packages/companion-bot",
+    "dev:data-backend": "npm run dev --workspace=packages/data-backend",
+    "dev:data-ui": "npm run dev --workspace=packages/data-ui",
+    "dev:manager-backend": "npm run dev --workspace=packages/manager-backend",
+    "dev:manager-ui": "npm run dev --workspace=packages/manager-ui",
+    "dev:all": "concurrently \"npm run dev:companion-bot\" \"npm run dev:data-backend\" \"npm run dev:manager-backend\" \"npm run dev:data-ui\" \"npm run dev:manager-ui\"",
+    "dev:manager": "concurrently \"npm run dev:companion-bot\" \"npm run dev:manager-backend\" \"npm run dev:manager-ui\"",
+    "build:data-ui": "npm run build --workspace=packages/data-ui",
+    "build:manager-ui": "npm run build --workspace=packages/manager-ui",
+    "install:all": "npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "author": "",
+  "license": "ISC"
+}
