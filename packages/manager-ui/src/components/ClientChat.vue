@@ -16,6 +16,7 @@
     </div>
     <div class="chat-input" ref="chatInputRef">
       <input 
+        ref="messageInput"
         v-model="inputText" 
         @keyup.enter="handleSend"
         placeholder="Введите сообщение..."
@@ -50,6 +51,7 @@ const emit = defineEmits(['send-message']);
 const inputText = ref('');
 const chatInputRef = ref(null);
 const messagesContainer = ref(null);
+const messageInput = ref(null);
 const dialogMembers = ref([]);
 
 // Получаем userId контакта (не менеджера)
@@ -117,6 +119,23 @@ const handleSend = () => {
   }
 };
 
+// Метод для установки текста и фокуса (вызывается из родительского компонента)
+const setInputTextAndFocus = (text) => {
+  inputText.value = text;
+  nextTick(() => {
+    if (messageInput.value) {
+      messageInput.value.focus();
+      // Устанавливаем курсор в конец текста
+      messageInput.value.setSelectionRange(text.length, text.length);
+    }
+  });
+};
+
+// Экспортируем метод для использования из родительского компонента
+defineExpose({
+  setInputTextAndFocus
+});
+
 // Функция для прокрутки вниз
 const scrollToBottom = () => {
   nextTick(() => {
@@ -159,12 +178,12 @@ onMounted(() => {
 
 .chat-header h3 {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1rem;
   flex: 1;
 }
 
 .client-user-id {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   color: #666;
   font-weight: normal;
   font-family: monospace;
@@ -213,6 +232,7 @@ onMounted(() => {
 .message-content {
   line-height: 1.4;
   word-break: break-word;
+  font-size: 0.875rem;
 }
 
 .message.own-message .message-content {
@@ -220,7 +240,7 @@ onMounted(() => {
 }
 
 .message-time {
-  font-size: 0.7rem;
+  font-size: 0.6875rem;
   opacity: 0.7;
   align-self: flex-end;
 }
@@ -247,7 +267,7 @@ onMounted(() => {
   padding: 0.5rem;
   border: 1px solid #e0e0e0;
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: 0.875rem;
   min-height: 40px;
   box-sizing: border-box;
 }
@@ -259,6 +279,7 @@ onMounted(() => {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  font-size: 0.875rem;
 }
 
 .chat-input button:hover {

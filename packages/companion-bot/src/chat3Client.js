@@ -76,7 +76,12 @@ export class Chat3UserBotClient {
         throw new Error('Chat3 API клиент не инициализирован');
       }
 
-      const { userId } = config.bot;
+      // Получаем userId бота (companionBot или bot, в зависимости от конфигурации)
+      const userId = config.companionBot?.userId || config.bot?.userId;
+      
+      if (!userId) {
+        throw new Error('Bot userId не настроен в конфигурации');
+      }
       
       // Отправляем сообщение от имени бота
       // Используем createMessage, который создаст сообщение от имени пользователя-бота

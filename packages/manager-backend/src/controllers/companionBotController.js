@@ -109,9 +109,10 @@ export async function getCompanionMessages(req, res) {
     }
 
     // Получаем сообщения из диалога с ботом
+    // Сортируем по createdAt по возрастанию (старые сверху, новые снизу)
     const params = {
       limit: parseInt(limit),
-      sort: JSON.stringify({ createdAt: 1 })
+      sort: JSON.stringify({ createdAt: 1 }) // JSON строка, как ожидает API
     };
     const messages = await chat3Client.getDialogMessages(companionDialogId, params);
 

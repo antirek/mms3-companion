@@ -1,5 +1,7 @@
 import { config } from './config.js';
 
+// Импортируем config для проверки manager.userId
+
 /**
  * Обработчик updates из RabbitMQ
  * Обрабатывает updates для менеджера и генерирует подсказки через companion-bot
@@ -7,6 +9,24 @@ import { config } from './config.js';
 export class UpdateHandlers {
   static chat3Client = null;
   static companionHandler = null;
+  
+  /**
+   * Получить диалог по ID (для проверки мета-тегов)
+   * @param {string} dialogId - ID диалога
+   * @returns {Promise<Object|null>}
+   */
+  static async getDialog(dialogId) {
+    try {
+      if (!this.chat3Client) {
+        return null;
+      }
+      const dialog = await this.chat3Client.getDialog(dialogId);
+      return dialog?.data || dialog || null;
+    } catch (error) {
+      console.warn(`Не удалось получить диалог ${dialogId}:`, error.message);
+      return null;
+    }
+  }
 
   /**
    * Установка клиента Chat3 API
@@ -44,25 +64,71 @@ export class UpdateHandlers {
       
       console.log('Получено обновление сообщения в диалоге:', {
         messageId: message.messageId,
-        dialogId: message.dialogId,
+        dialogId: message.dialogId || dialog?.dialogId,
         senderId: message.senderId,
-        content: message.content,
+        content: message.content?.substring(0, 50),
         type: message.type,
         eventType: eventType,
+        dialogMeta: dialog?.meta,
       });
 
       // Обработка различных типов событий сообщений
       if (eventType === 'message.create') {
-        // Используем CompanionHandler для обработки сообщений от клиентов менеджеру
+        // Используем CompanionHandler для обработки сообщений
         if (this.companionHandler) {
-          const result = await this.companionHandler.handleClientMessage(update);
-          if (result.success) {
-            console.log(`Сообщение обработано в диалоге ${message.dialogId}`, {
-              handled: result.handled,
-              suggestion: result.suggestion ? result.suggestion.substring(0, 50) + '...' : null,
-            });
+          // Сначала проверяем, не является ли это сообщением от менеджера в диалоге с ботом
+          const isManagerMessage = message.senderId === config.manager.userId;
+          const dialogId = message.dialogId || dialog?.dialogId;
+          
+          // Получаем мета-теги диалога для проверки типа
+          let isCompanionBotDialog = false;
+          if (dialog?.meta) {
+            isCompanionBotDialog = dialog.meta.type === 'companion_bot' || 
+                                    dialog.meta.type?.value === 'companion_bot';
+          } else if (dialogId) {
+            // Если мета-теги не пришли в update, получаем диалог напрямую
+            try {
+              const dialogData = await this.chat3Client.getDialog(dialogId);
+              const dialogMeta = dialogData?.data?.meta || dialogData?.meta || {};
+              isCompanionBotDialog = dialogMeta.type === 'companion_bot' || 
+                                      dialogMeta.type?.value === 'companion_bot';
+            } catch (error) {
+              console.warn(`Не удалось получить диалог ${dialogId} для проверки типа:`, error.message);
+            }
+          }
+          
+          console.log('Проверка типа сообщения:', {
+            isManagerMessage,
+            isCompanionBotDialog,
+            senderId: message.senderId,
+            dialogId: dialogId,
+          });
+          
+          if (isManagerMessage && isCompanionBotDialog) {
+            // Обрабатываем сообщение от менеджера в диалоге с ботом
+            console.log('Обработка сообщения от менеджера в диалоге с ботом...');
+            const result = await this.companionHandler.handleManagerMessageToBot(update);
+            if (result.success) {
+              console.log(`Сообщение от менеджера обработано в диалоге с ботом ${dialogId}`, {
+                handled: result.handled,
+                response: result.response ? result.response.substring(0, 50) + '...' : null,
+              });
+            } else {
+              console.error(`Ошибка обработки сообщения от менеджера:`, result.error);
+            }
+          } else if (!isManagerMessage && !this.companionHandler.managerService.isCompanionBot(message.senderId)) {
+            // Обрабатываем сообщение от клиента менеджеру
+            const result = await this.companionHandler.handleClientMessage(update);
+            if (result.success) {
+              console.log(`Сообщение обработано в диалоге ${dialogId}`, {
+                handled: result.handled,
+                suggestion: result.suggestion ? result.suggestion.substring(0, 50) + '...' : null,
+              });
+            } else {
+              console.error(`Ошибка обработки сообщения:`, result.error);
+            }
           } else {
-            console.error(`Ошибка обработки сообщения:`, result.error);
+            console.debug('Сообщение пропущено (от бота или не в диалоге с ботом)');
           }
         } else {
           console.warn('CompanionHandler не установлен, невозможно обработать сообщение');

@@ -4,21 +4,68 @@
       <h3>Бот-компаньон</h3>
       <span v-if="companionDialogId" class="dialog-id">{{ companionDialogId }}</span>
     </div>
-    <div class="chat-messages">
-      <div 
-        v-for="message in messages" 
-        :key="message.messageId || message._id"
-        class="message suggestion"
-      >
-        <div class="message-content">{{ message.content }}</div>
-        <div class="message-time">{{ formatTime(message.createdAt) }}</div>
-        <button 
-          class="use-button"
-          @click="handleUseSuggestion(message.content)"
+    <div class="chat-messages" ref="messagesContainer">
+      <template v-for="(message, index) in messages" :key="message.messageId || message._id">
+        <!-- Разделитель перед сообщением клиента -->
+        <div 
+          v-if="isClientMessage(message) && shouldShowDivider(messages, index)"
+          class="message-divider"
         >
-          Использовать
-        </button>
-      </div>
+          <span class="divider-text">Сообщение от клиента</span>
+        </div>
+        
+        <!-- Сообщение клиента -->
+        <div 
+          v-if="isClientMessage(message)"
+          class="message client-message"
+        >
+          <div class="message-content" v-html="formatClientMessage(message.content)"></div>
+          <div class="message-time">{{ formatTime(message.createdAt) }}</div>
+        </div>
+        
+        <!-- Разделитель перед подсказкой бота (показывается всегда, если предыдущее сообщение не подсказка) -->
+        <div 
+          v-if="isBotMessage(message) && isSuggestion(message) && shouldShowDivider(messages, index)"
+          class="message-divider"
+        >
+          <span class="divider-text">Подсказка от бота</span>
+        </div>
+        
+        <!-- Сообщение менеджера или бота -->
+        <div 
+          v-if="!isClientMessage(message)"
+          :class="['message', isBotMessage(message) ? 'bot-message' : 'manager-message']"
+        >
+          <!-- Если это подсказка с рекомендацией и примерами -->
+          <div v-if="isBotMessage(message) && isSuggestion(message) && parseSuggestion(message.content)" class="suggestion-content">
+            <div class="recommendation-section">
+              <div class="section-title">💡 Рекомендация:</div>
+              <div class="recommendation-text">{{ parseSuggestion(message.content).recommendation }}</div>
+            </div>
+            <div v-if="parseSuggestion(message.content).examples && parseSuggestion(message.content).examples.length > 0" class="examples-section">
+              <div class="section-title">📝 Примеры ответов:</div>
+              <div 
+                v-for="(example, idx) in parseSuggestion(message.content).examples" 
+                :key="idx"
+                class="example-item"
+              >
+                <div class="example-number">{{ idx + 1 }}.</div>
+                <div class="example-text">{{ example }}</div>
+                <button 
+                  class="copy-button"
+                  @click="handleCopyExample(example)"
+                  :title="'Скопировать пример ' + (idx + 1)"
+                >
+                  📋 Копировать
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- Обычное сообщение -->
+          <div v-else class="message-content">{{ message.content }}</div>
+          <div class="message-time">{{ formatTime(message.createdAt) }}</div>
+        </div>
+      </template>
       <div v-if="messages.length === 0" class="empty">
         Подсказки от бота-компаньона появятся здесь
       </div>
@@ -36,7 +83,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, watch, nextTick, onMounted } from 'vue';
 import { sendMessage as sendMessageAPI } from '../api/companionBot.js';
 
 const props = defineProps({
@@ -51,23 +98,177 @@ const props = defineProps({
   companionDialogId: {
     type: String,
     default: null
+  },
+  managerUserId: {
+    type: String,
+    default: 'carl'
   }
 });
 
 const emit = defineEmits(['use-suggestion', 'message-sent']);
 
 const inputText = ref('');
+const messagesContainer = ref(null);
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
-  const date = new Date(timestamp);
+  
+  let date;
+  // Обрабатываем разные форматы timestamp
+  if (typeof timestamp === 'number') {
+    // Если число, проверяем, это миллисекунды или секунды
+    date = timestamp > 1000000000000 
+      ? new Date(timestamp) 
+      : new Date(timestamp * 1000);
+  } else if (typeof timestamp === 'string') {
+    // Если строка, пытаемся распарсить
+    const numTimestamp = parseFloat(timestamp);
+    if (!isNaN(numTimestamp)) {
+      date = numTimestamp > 1000000000000 
+        ? new Date(numTimestamp) 
+        : new Date(numTimestamp * 1000);
+    } else {
+      date = new Date(timestamp);
+    }
+  } else {
+    return '';
+  }
+  
+  // Проверяем, что дата валидна
+  if (isNaN(date.getTime())) {
+    return '';
+  }
+  
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+};
+
+const isBotMessage = (message) => {
+  // Сообщение от бота, если senderId не равен managerUserId
+  return message.senderId !== props.managerUserId;
+};
+
+const isClientMessage = (message) => {
+  // Проверяем мета-тег или префикс сообщения
+  return message.meta?.isClientMessage?.value === true || 
+         message.meta?.isClientMessage === true ||
+         (message.content && message.content.startsWith('📩 Сообщение от клиента'));
+};
+
+const isSuggestion = (message) => {
+  // Проверяем мета-тег или префикс сообщения
+  return message.meta?.isSuggestion?.value === true || 
+         message.meta?.isSuggestion === true ||
+         (message.content && message.content.startsWith('💡 Подсказка для ответа клиенту'));
+};
+
+const formatClientMessage = (content) => {
+  // Убираем префикс "📩 Сообщение от клиента..." если есть, но оставляем сам текст
+  if (content && content.includes('📩 Сообщение от клиента')) {
+    // Ищем паттерн: "📩 Сообщение от клиента [имя]:\n\n[текст]"
+    const match = content.match(/📩 Сообщение от клиента[^:]+:\s*\n\n(.*)/s);
+    if (match && match[1]) {
+      return match[1].trim().replace(/\n/g, '<br>');
+    }
+    // Альтернативный паттерн без двойного переноса строки
+    const match2 = content.match(/📩 Сообщение от клиента[^:]+:\s*\n(.*)/s);
+    if (match2 && match2[1]) {
+      return match2[1].trim().replace(/\n/g, '<br>');
+    }
+  }
+  return (content || '').replace(/\n/g, '<br>');
+};
+
+const shouldShowDivider = (messages, index) => {
+  // Показываем разделитель, если предыдущее сообщение другого типа
+  if (index === 0) return false;
+  
+  const current = messages[index];
+  const previous = messages[index - 1];
+  
+  const currentIsClient = isClientMessage(current);
+  const currentIsSuggestion = isSuggestion(current) && isBotMessage(current);
+  const previousIsClient = isClientMessage(previous);
+  const previousIsSuggestion = isSuggestion(previous) && isBotMessage(previous);
+  
+  // Разделитель перед сообщением клиента, если предыдущее не клиентское
+  if (currentIsClient && !previousIsClient) return true;
+  
+  // Разделитель перед подсказкой, если предыдущее не подсказка (даже если это сообщение клиента)
+  if (currentIsSuggestion && !previousIsSuggestion) return true;
+  
+  return false;
+};
+
+/**
+ * Парсинг подсказки для извлечения рекомендации и примеров
+ * @param {string} content - Содержимое сообщения с подсказкой
+ * @returns {Object|null} - Объект с recommendation и examples, или null если не удалось распарсить
+ */
+const parseSuggestion = (content) => {
+  if (!content) return null;
+  
+  // Убираем префикс "💡 Подсказка для ответа клиенту..."
+  let text = content.replace(/^💡 Подсказка для ответа клиенту[^:]+:\s*\n\n/, '');
+  text = text.replace(/^Подсказка для менеджера:\s*\n\n/, '');
+  
+  // Ищем раздел РЕКОМЕНДАЦИЯ
+  const recommendationMatch = text.match(/\*\*РЕКОМЕНДАЦИЯ:\*\*\s*\n(.*?)(?=\*\*ПРИМЕРЫ|$)/s);
+  const recommendation = recommendationMatch 
+    ? recommendationMatch[1].trim() 
+    : null;
+  
+  // Ищем раздел ПРИМЕРЫ ОТВЕТОВ
+  const examplesMatch = text.match(/\*\*ПРИМЕРЫ ОТВЕТОВ:\*\*\s*\n(.*?)$/s);
+  let examples = [];
+  
+  if (examplesMatch) {
+    const examplesText = examplesMatch[1];
+    // Ищем примеры в формате "1. [текст]" или "1. [текст]"
+    const examplePattern = /^\d+\.\s*(.+?)(?=\n\d+\.|$)/gms;
+    let match;
+    while ((match = examplePattern.exec(examplesText)) !== null) {
+      const exampleText = match[1].trim();
+      if (exampleText) {
+        examples.push(exampleText);
+      }
+    }
+    
+    // Если не нашли примеры в формате списка, попробуем найти просто пронумерованные строки
+    if (examples.length === 0) {
+      const lines = examplesText.split('\n').filter(line => line.trim());
+      examples = lines
+        .filter(line => /^\d+\./.test(line.trim()))
+        .map(line => line.replace(/^\d+\.\s*/, '').trim())
+        .filter(line => line.length > 0);
+    }
+  }
+  
+  // Если не нашли структурированный формат, возвращаем весь текст как рекомендацию
+  if (!recommendation && examples.length === 0) {
+    return {
+      recommendation: text.trim(),
+      examples: []
+    };
+  }
+  
+  return {
+    recommendation: recommendation || '',
+    examples: examples
+  };
 };
 
 const handleUseSuggestion = (suggestionText) => {
   // Убираем префикс "💡 Подсказка для ответа клиенту..."
   const cleanText = suggestionText.replace(/^💡 Подсказка для ответа клиенту[^:]+:\s*\n\n/, '');
   emit('use-suggestion', cleanText);
+};
+
+/**
+ * Копирование примера ответа в поле ввода
+ * @param {string} exampleText - Текст примера для копирования
+ */
+const handleCopyExample = (exampleText) => {
+  emit('use-suggestion', exampleText);
 };
 
 const handleSend = async () => {
@@ -78,11 +279,32 @@ const handleSend = async () => {
     if (response.success) {
       inputText.value = '';
       emit('message-sent');
+      // Прокручиваем вниз после отправки сообщения
+      scrollToBottom();
     }
   } catch (error) {
     console.error('Ошибка при отправке сообщения:', error);
   }
 };
+
+// Функция для прокрутки вниз
+const scrollToBottom = () => {
+  nextTick(() => {
+    if (messagesContainer.value) {
+      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+    }
+  });
+};
+
+// Прокручиваем вниз при изменении сообщений
+watch(() => props.messages, () => {
+  scrollToBottom();
+}, { deep: true });
+
+// Прокручиваем вниз при монтировании компонента
+onMounted(() => {
+  scrollToBottom();
+});
 </script>
 
 <style scoped>
@@ -104,7 +326,7 @@ const handleSend = async () => {
 
 .chat-header h3 {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1rem;
   flex: 1;
 }
 
@@ -121,45 +343,162 @@ const handleSend = async () => {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 0.875rem;
   background: #fafafa;
   min-height: 0; /* Важно для flex */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message-divider {
+  display: flex;
+  align-items: center;
+  margin: 0.75rem 0;
+  position: relative;
+}
+
+.message-divider::before,
+.message-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e0e0e0;
+}
+
+.divider-text {
+  padding: 0 0.75rem;
+  font-size: 0.75rem;
+  color: #999;
+  background: #fafafa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .message {
-  margin-bottom: 1rem;
-  padding: 0.75rem;
-  background: #fff;
+  margin-bottom: 0.75rem;
+  padding: 0.625rem 0.875rem;
   border-radius: 8px;
-  border-left: 3px solid #4caf50;
+  font-size: 0.875rem;
+  line-height: 1.4;
 }
 
-.message.suggestion {
+.message.manager-message {
+  background: #e3f2fd;
+  border-left: 3px solid #2196f3;
+  align-self: flex-end;
+  margin-left: auto;
+  max-width: 80%;
+}
+
+.message.client-message {
+  background: #fff3e0;
+  border-left: 3px solid #ff9800;
+  align-self: flex-start;
+  max-width: 85%;
+  margin-bottom: 0.5rem;
+}
+
+.message.bot-message {
   background: #f1f8e9;
+  border-left: 3px solid #4caf50;
+  align-self: flex-start;
+  max-width: 90%;
 }
 
 .message-content {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.375rem;
+  word-wrap: break-word;
 }
 
 .message-time {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   color: #999;
+  margin-bottom: 0.375rem;
+}
+
+.suggestion-content {
+  width: 100%;
+}
+
+.recommendation-section {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px dashed #e0e0e0;
+}
+
+.section-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: #4caf50;
   margin-bottom: 0.5rem;
 }
 
-.use-button {
-  padding: 0.25rem 0.75rem;
+.recommendation-text {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #333;
+  padding: 0.5rem;
+  background: #f9f9f9;
+  border-radius: 4px;
+  border-left: 3px solid #4caf50;
+}
+
+.examples-section {
+  margin-top: 0.75rem;
+}
+
+.example-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  transition: all 0.2s;
+}
+
+.example-item:hover {
+  border-color: #4caf50;
+  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.1);
+}
+
+.example-number {
+  font-weight: 600;
+  color: #4caf50;
+  font-size: 0.875rem;
+  min-width: 1.5rem;
+}
+
+.example-text {
+  flex: 1;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #333;
+  word-wrap: break-word;
+}
+
+.copy-button {
+  padding: 0.375rem 0.75rem;
   background: #4caf50;
   color: #fff;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  transition: background 0.2s;
+  flex-shrink: 0;
 }
 
-.use-button:hover {
+.copy-button:hover {
   background: #388e3c;
+}
+
+.copy-button:active {
+  background: #2e7d32;
 }
 
 .empty {
@@ -186,7 +525,7 @@ const handleSend = async () => {
   padding: 0.5rem;
   border: 1px solid #e0e0e0;
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: 0.875rem;
   min-height: 40px;
   box-sizing: border-box;
 }
@@ -198,7 +537,7 @@ const handleSend = async () => {
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 1rem;
+  font-size: 0.875rem;
 }
 
 .chat-input button:hover {

@@ -15,6 +15,7 @@
       <div class="column client-chat">
         <ClientChat 
           v-if="activeDialog"
+          ref="clientChatRef"
           :dialog="activeDialog"
           :messages="clientMessages"
           :manager-user-id="managerUserId"
@@ -30,6 +31,7 @@
           :client-dialog-id="activeDialogId"
           :messages="companionMessages"
           :companion-dialog-id="companionBotDialog?.dialogId || companionDialogId"
+          :manager-user-id="managerUserId"
           @use-suggestion="handleUseSuggestion"
           @message-sent="handleCompanionMessageSent"
         />
@@ -42,7 +44,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, nextTick } from 'vue';
 import { useManagerChat } from './composables/useManagerChat.js';
 import { useCompanionBot } from './composables/useCompanionBot.js';
 import { useWebSocket } from './composables/useWebSocket.js';
@@ -64,6 +66,9 @@ const {
 // ID менеджера (можно вынести в конфигурацию)
 const managerUserId = ref('carl');
 
+// Ref для компонента ClientChat
+const clientChatRef = ref(null);
+
 const {
   companionMessages,
   companionDialogId,
@@ -84,27 +89,51 @@ const handleWebSocketMessage = (data) => {
     console.log('Получено новое сообщение:', {
       dialogId,
       activeDialogId: activeDialogId.value,
+      companionBotDialogId: companionBotDialog.value?.dialogId,
       messageId: message.messageId,
       senderId: message.senderId
     });
     
-    // Если это сообщение в активном диалоге, добавляем его в список
-    if (dialogId === activeDialogId.value) {
+    // Проверяем, является ли это сообщением в диалоге с ботом-компаньоном
+    const companionBotDialogId = companionBotDialog.value?.dialogId || companionDialogId.value;
+    const isCompanionBotMessage = dialogId === companionBotDialogId;
+    
+    // Если это сообщение в активном диалоге с клиентом, добавляем его в список
+    if (dialogId === activeDialogId.value && !isCompanionBotMessage) {
       // Проверяем, нет ли уже такого сообщения (избегаем дубликатов)
       const exists = clientMessages.value.some(m => 
         (m.messageId || m._id) === (message.messageId || message._id)
       );
       
       if (!exists) {
-        console.log('Добавляем сообщение в список:', message.messageId);
+        console.log('Добавляем сообщение клиента в список:', message.messageId);
         clientMessages.value.push(message);
         // Перезагружаем подсказки от бота
         loadCompanionMessages(dialogId);
       } else {
-        console.log('Сообщение уже существует в списке');
+        console.log('Сообщение клиента уже существует в списке');
+      }
+    } 
+    // Если это сообщение в диалоге с ботом-компаньоном для активного клиента
+    else if (isCompanionBotMessage && activeDialogId.value) {
+      // Проверяем, нет ли уже такого сообщения (избегаем дубликатов)
+      const exists = companionMessages.value.some(m => 
+        (m.messageId || m._id) === (message.messageId || message._id)
+      );
+      
+      if (!exists) {
+        console.log('Добавляем сообщение бота в список:', message.messageId);
+        companionMessages.value.push(message);
+      } else {
+        console.log('Сообщение бота уже существует в списке');
       }
     } else {
       console.log('Сообщение не в активном диалоге, обновляем список диалогов');
+      // Если сообщение не в активном диалоге, но это сообщение в диалоге с ботом,
+      // перезагружаем сообщения бота для активного диалога
+      if (activeDialogId.value) {
+        loadCompanionMessages(activeDialogId.value);
+      }
     }
     
     // Обновляем список диалогов для обновления последнего сообщения
@@ -145,8 +174,18 @@ const handleSendMessage = async (content) => {
 };
 
 const handleUseSuggestion = (suggestionText) => {
-  // Передаем подсказку в ClientChat для использования
-  // Это будет реализовано через ref или emit
+  // Убираем префикс "💡 Подсказка для ответа клиенту..." если есть
+  const cleanText = suggestionText.replace(/^💡 Подсказка для ответа клиенту[^:]+:\s*\n\n/, '');
+  
+  // Убираем также "**Подсказка для менеджера:**" если есть
+  const finalText = cleanText.replace(/^\*\*Подсказка для менеджера:\*\*\s*\n\n?/, '').trim();
+  
+  // Устанавливаем текст в поле ввода и переключаем фокус
+  nextTick(() => {
+    if (clientChatRef.value && clientChatRef.value.setInputTextAndFocus) {
+      clientChatRef.value.setInputTextAndFocus(finalText);
+    }
+  });
 };
 
 const handleCompanionMessageSent = () => {
@@ -172,7 +211,7 @@ const handleCompanionMessageSent = () => {
 
 .header h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   color: #333;
 }
 
@@ -188,6 +227,21 @@ const handleCompanionMessageSent = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  font-size: 0.875rem;
+}
+
+.column h2 {
+  font-size: 1rem;
+  margin: 0;
+  padding: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fff;
+}
+
+.column.dialog-list {
+  flex: 0 0 250px;
+  min-width: 250px;
+  max-width: 250px;
 }
 
 .column:last-child {

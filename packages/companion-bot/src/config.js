@@ -34,8 +34,8 @@ export const config = {
     model: process.env.GIGACHAT_MODEL || 'GigaChat-2',
     // Низкая температура для более точной и детерминированной классификации
     temperature: parseFloat(process.env.GIGACHAT_TEMPERATURE || '0.1'),
-    // Достаточно токенов для JSON ответа с данными
-    maxTokens: parseInt(process.env.GIGACHAT_MAX_TOKENS || '1500', 10),
+    // Увеличиваем количество токенов для формата "рекомендация + примеры" (500 токенов = ~350-400 слов)
+    maxTokens: parseInt(process.env.GIGACHAT_MAX_TOKENS || '500', 10),
     // Top-p для более структурированных ответов (0.1 = более детерминированный)
     topP: parseFloat(process.env.GIGACHAT_TOP_P || '0.1'),
   },

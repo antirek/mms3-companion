@@ -18,7 +18,9 @@ export function useCompanionBot() {
       // Загружаем сообщения
       const response = await getCompanionMessages(clientDialogId);
       if (response.success) {
-        companionMessages.value = response.data.reverse() || [];
+        // Сообщения уже отсортированы по createdAt по возрастанию (старые сверху, новые снизу)
+        // Не нужно делать reverse(), так как мы хотим видеть старые сверху, новые снизу
+        companionMessages.value = response.data || [];
       }
     } catch (error) {
       console.error('Ошибка при загрузке подсказок от бота:', error);

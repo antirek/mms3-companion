@@ -63,18 +63,25 @@ export class RabbitMQUpdatesClient {
 
       const exchange = process.env.RABBITMQ_UPDATES_EXCHANGE || 'chat3_updates';
       const managerUserId = config.manager.userId;
+      const companionBotUserId = config.companionBot?.userId || 'bot_companion';
 
       // Имя очереди для менеджера
       const queue = `user_${managerUserId}_updates`;
       
-      // Routing keys для подписки на updates менеджера
+      // Routing keys для подписки на updates менеджера и бота-компаньона
       // Подписываемся на все возможные варианты для надежности
       // Формат: update.{category}.{userType}.{userId}.{updateType}
       const routingKeys = [
+        // Updates для менеджера
         `update.dialog.user.${managerUserId}.*`,      // Для user типа
         `update.dialog.*.${managerUserId}.*`,         // Для любого типа (wildcard)
         `update.*.user.${managerUserId}.*`,            // Для всех категорий, user типа
-        `update.*.*.${managerUserId}.*`               // Для всех категорий и типов
+        `update.*.*.${managerUserId}.*`,               // Для всех категорий и типов
+        // Updates для бота-компаньона (чтобы получать его сообщения в диалогах с менеджером)
+        `update.dialog.bot.${companionBotUserId}.*`,   // Для bot типа
+        `update.dialog.*.${companionBotUserId}.*`,      // Для любого типа (wildcard)
+        `update.*.bot.${companionBotUserId}.*`,         // Для всех категорий, bot типа
+        `update.*.*.${companionBotUserId}.*`            // Для всех категорий и типов
       ];
 
       // Убеждаемся, что очередь существует
@@ -152,32 +159,31 @@ export class RabbitMQUpdatesClient {
         const message = data.message;
         const dialog = data.dialog;
 
-        // Проверяем, что сообщение не от менеджера
-        if (message.senderId !== config.manager.userId) {
-          console.log('Получено новое сообщение от клиента:', {
+        // Отправляем ВСЕ сообщения, которые относятся к диалогам менеджера
+        // (включая сообщения от клиентов, бота-компаньона и самого менеджера)
+        console.log('Получено новое сообщение для менеджера:', {
+          dialogId: dialog?.dialogId,
+          messageId: message.messageId,
+          senderId: message.senderId,
+          content: message.content?.substring(0, 50),
+        });
+
+        // Отправляем обновление через WebSocket
+        if (this.broadcastCallback) {
+          console.log('Отправка сообщения через WebSocket:', {
             dialogId: dialog?.dialogId,
             messageId: message.messageId,
-            senderId: message.senderId,
-            content: message.content?.substring(0, 50),
+            senderId: message.senderId
           });
-
-          // Отправляем обновление через WebSocket
-          if (this.broadcastCallback) {
-            console.log('Отправка сообщения через WebSocket:', {
-              dialogId: dialog?.dialogId,
-              messageId: message.messageId,
-              senderId: message.senderId
-            });
-            this.broadcastCallback({
-              type: 'message.created',
-              dialogId: dialog?.dialogId,
-              message: message,
-              dialog: dialog
-            });
-            console.log('Сообщение отправлено через WebSocket');
-          } else {
-            console.warn('broadcastCallback не установлен, сообщение не отправлено');
-          }
+          this.broadcastCallback({
+            type: 'message.created',
+            dialogId: dialog?.dialogId,
+            message: message,
+            dialog: dialog
+          });
+          console.log('Сообщение отправлено через WebSocket');
+        } else {
+          console.warn('broadcastCallback не установлен, сообщение не отправлено');
         }
       }
     } catch (error) {

@@ -17,6 +17,10 @@ export const config = {
     userId: process.env.MANAGER_USER_ID || 'manager_1',
     name: process.env.MANAGER_NAME || 'Manager',
   },
+  companionBot: {
+    userId: process.env.COMPANION_BOT_USER_ID || 'bot_companion',
+    name: process.env.COMPANION_BOT_NAME || 'Бот-компаньон',
+  },
   chat3: {
     apiUrl: process.env.CHAT3_API_URL || 'http://localhost:3000/api',
     apiKey: process.env.CHAT3_API_KEY || '',
