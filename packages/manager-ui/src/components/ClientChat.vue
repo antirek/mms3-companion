@@ -11,7 +11,10 @@
         :class="['message', { 'own-message': isOwnMessage(message) }]"
       >
         <div class="message-content">{{ message.content }}</div>
-        <div class="message-time">{{ formatTime(message.createdAt) }}</div>
+        <div class="message-meta">
+          <span class="message-sender">{{ message.senderId || 'Unknown' }}</span>
+          <span class="message-time">{{ formatTime(message.createdAt) }}</span>
+        </div>
       </div>
     </div>
     <div class="chat-input" ref="chatInputRef">
@@ -90,7 +93,7 @@ const isOwnMessage = (message) => {
 };
 
 const formatTime = (timestamp) => {
-  if (!timestamp) return '';
+  if (!timestamp) return '—';
   
   // Обрабатываем разные форматы timestamp
   let date;
@@ -98,15 +101,23 @@ const formatTime = (timestamp) => {
     // Если это число в миллисекундах или микросекундах
     date = timestamp > 1000000000000 
       ? new Date(timestamp) 
-      : new Date(timestamp / 1000); // Если микросекунды, делим на 1000
+      : new Date(timestamp * 1000); // Если секунды, умножаем на 1000
   } else if (typeof timestamp === 'string') {
-    date = new Date(timestamp);
+    // Пытаемся распарсить строку как число
+    const numTimestamp = parseFloat(timestamp);
+    if (!isNaN(numTimestamp)) {
+      date = numTimestamp > 1000000000000 
+        ? new Date(numTimestamp) 
+        : new Date(numTimestamp * 1000);
+    } else {
+      date = new Date(timestamp);
+    }
   } else {
-    return '';
+    return '—';
   }
   
   if (isNaN(date.getTime())) {
-    return '';
+    return '—';
   }
   
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
@@ -239,12 +250,36 @@ onMounted(() => {
   color: #fff;
 }
 
-.message-time {
-  font-size: 0.6875rem;
-  opacity: 0.7;
-  align-self: flex-end;
+.message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  opacity: 0.85;
+  min-height: 1.2rem;
 }
 
+.message-sender {
+  font-family: monospace;
+  font-weight: 500;
+  font-size: 0.75rem;
+  color: inherit;
+}
+
+.message-time {
+  font-size: 0.75rem;
+  opacity: 0.85;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.message.own-message .message-meta {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.message.own-message .message-sender,
 .message.own-message .message-time {
   color: rgba(255, 255, 255, 0.8);
 }

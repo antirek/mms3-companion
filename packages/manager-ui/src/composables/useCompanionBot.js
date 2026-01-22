@@ -18,9 +18,42 @@ export function useCompanionBot() {
       // Загружаем сообщения
       const response = await getCompanionMessages(clientDialogId);
       if (response.success) {
-        // Сообщения уже отсортированы по createdAt по возрастанию (старые сверху, новые снизу)
-        // Не нужно делать reverse(), так как мы хотим видеть старые сверху, новые снизу
-        companionMessages.value = response.data || [];
+        // Сортируем сообщения по createdAt по возрастанию (старые сверху, новые снизу)
+        const messages = response.data || [];
+        companionMessages.value = messages.sort((a, b) => {
+          const timeA = a.createdAt || 0;
+          const timeB = b.createdAt || 0;
+          
+          // Нормализуем timestamp
+          let normalizedA = 0;
+          let normalizedB = 0;
+          
+          if (typeof timeA === 'number') {
+            normalizedA = timeA > 1000000000000 ? timeA : timeA * 1000;
+          } else if (typeof timeA === 'string') {
+            // Пытаемся распарсить строку как число
+            const numA = parseFloat(timeA);
+            if (!isNaN(numA)) {
+              normalizedA = numA > 1000000000000 ? numA : numA * 1000;
+            } else {
+              normalizedA = new Date(timeA).getTime() || 0;
+            }
+          }
+          
+          if (typeof timeB === 'number') {
+            normalizedB = timeB > 1000000000000 ? timeB : timeB * 1000;
+          } else if (typeof timeB === 'string') {
+            // Пытаемся распарсить строку как число
+            const numB = parseFloat(timeB);
+            if (!isNaN(numB)) {
+              normalizedB = numB > 1000000000000 ? numB : numB * 1000;
+            } else {
+              normalizedB = new Date(timeB).getTime() || 0;
+            }
+          }
+          
+          return normalizedA - normalizedB; // По возрастанию (старые первыми)
+        });
       }
     } catch (error) {
       console.error('Ошибка при загрузке подсказок от бота:', error);

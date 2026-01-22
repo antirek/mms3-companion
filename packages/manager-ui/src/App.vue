@@ -123,7 +123,44 @@ const handleWebSocketMessage = (data) => {
       
       if (!exists) {
         console.log('Добавляем сообщение бота в список:', message.messageId);
-        companionMessages.value.push(message);
+        // Создаем новый массив для правильной реактивности Vue
+        const newMessages = [...companionMessages.value, message];
+        // Сортируем сообщения по createdAt после добавления нового
+        newMessages.sort((a, b) => {
+          const timeA = a.createdAt || 0;
+          const timeB = b.createdAt || 0;
+          
+          // Нормализуем timestamp
+          let normalizedA = 0;
+          let normalizedB = 0;
+          
+          if (typeof timeA === 'number') {
+            normalizedA = timeA > 1000000000000 ? timeA : timeA * 1000;
+          } else if (typeof timeA === 'string') {
+            const numA = parseFloat(timeA);
+            if (!isNaN(numA)) {
+              normalizedA = numA > 1000000000000 ? numA : numA * 1000;
+            } else {
+              normalizedA = new Date(timeA).getTime() || 0;
+            }
+          }
+          
+          if (typeof timeB === 'number') {
+            normalizedB = timeB > 1000000000000 ? timeB : timeB * 1000;
+          } else if (typeof timeB === 'string') {
+            const numB = parseFloat(timeB);
+            if (!isNaN(numB)) {
+              normalizedB = numB > 1000000000000 ? numB : numB * 1000;
+            } else {
+              normalizedB = new Date(timeB).getTime() || 0;
+            }
+          }
+          
+          return normalizedA - normalizedB; // По возрастанию (старые сверху, новые снизу)
+        });
+        // Присваиваем новый массив для триггера реактивности
+        companionMessages.value = newMessages;
+        console.log('Сообщение бота добавлено, всего сообщений:', companionMessages.value.length);
       } else {
         console.log('Сообщение бота уже существует в списке');
       }
