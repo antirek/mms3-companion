@@ -3,12 +3,12 @@ import { getManagerDialogs, getDialogMessages, sendMessage as sendMessageAPI } f
 
 export function useManagerChat() {
   const dialogs = ref([]);
-  const activeDialogId = ref(null);
+  const clientDialogId = ref(null);
   const clientMessages = ref([]);
   const loading = ref(false);
 
-  const activeDialog = computed(() => {
-    return dialogs.value.find(d => d.dialogId === activeDialogId.value);
+  const clientDialog = computed(() => {
+    return dialogs.value.find(d => d.dialogId === clientDialogId.value);
   });
 
   const loadDialogs = async () => {
@@ -26,7 +26,7 @@ export function useManagerChat() {
   };
 
   const selectDialog = async (dialogId) => {
-    activeDialogId.value = dialogId;
+    clientDialogId.value = dialogId;
     await loadMessages(dialogId);
   };
 
@@ -43,15 +43,15 @@ export function useManagerChat() {
   };
 
   const sendMessage = async (content) => {
-    if (!activeDialogId.value) return;
+    if (!clientDialogId.value) return;
     
     try {
-      const response = await sendMessageAPI(activeDialogId.value, content);
+      const response = await sendMessageAPI(clientDialogId.value, content);
       if (response.success) {
         // Добавляем сообщение в список
         clientMessages.value.push(response.data);
         // Перезагружаем сообщения
-        await loadMessages(activeDialogId.value);
+        await loadMessages(clientDialogId.value);
       }
     } catch (error) {
       console.error('Ошибка при отправке сообщения:', error);
@@ -60,8 +60,8 @@ export function useManagerChat() {
 
   return {
     dialogs,
-    activeDialogId,
-    activeDialog,
+    clientDialogId,
+    clientDialog,
     clientMessages,
     loading,
     loadDialogs,

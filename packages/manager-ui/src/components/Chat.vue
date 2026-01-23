@@ -1,54 +1,50 @@
 <template>
-  <div class="companion-bot-chat">
+  <div class="chat">
     <div class="chat-header">
-      <h3>Бот-компаньон</h3>
-      <span v-if="companionDialogId" class="dialog-id">{{ companionDialogId }}</span>
+      <h3>{{ headerTitle }}</h3>
+      <span v-if="headerSubtitle" class="header-subtitle">{{ headerSubtitle }}</span>
     </div>
     <div class="chat-messages" ref="messagesContainer">
-      <div 
-        v-for="(message, index) in messages" 
-        :key="`msg-${message.messageId || message._id || index}`"
-        style="display: contents;"
-      >
-        <!-- Разделитель перед сообщением клиента -->
+      <template v-for="(message, index) in messages" :key="`msg-${message.messageId || message._id || index}`">
+        <!-- Разделитель перед сообщением клиента (только для бота) -->
         <div 
-          v-if="isClientMessage(message) && shouldShowDivider(messages, index)"
+          v-if="isBotMode && isClientMessage(message) && shouldShowDivider(messages, index)"
           class="message-divider"
         >
           <span class="divider-text">Сообщение от клиента</span>
         </div>
         
-        <!-- Сообщение клиента -->
+        <!-- Сообщение клиента (только для бота) -->
         <div 
-          v-if="isClientMessage(message)"
+          v-if="isBotMode && isClientMessage(message)"
           class="message client-message"
         >
           <div class="message-content" v-html="formatClientMessage(message.content)"></div>
           <div class="message-time">{{ formatTime(message.createdAt) }}</div>
         </div>
         
-        <!-- Разделитель перед подсказкой бота (показывается всегда, если предыдущее сообщение не подсказка) -->
+        <!-- Разделитель перед подсказкой бота -->
         <div 
-          v-if="isBotMessage(message) && isSuggestion(message) && shouldShowDivider(messages, index)"
+          v-if="isBotMode && isBotMessage(message) && isSuggestion(message) && shouldShowDivider(messages, index)"
           class="message-divider"
         >
           <span class="divider-text">Подсказка от бота</span>
         </div>
         
-        <!-- Сообщение менеджера или бота -->
+        <!-- Обычное сообщение -->
         <div 
-          v-if="!isClientMessage(message)"
-          :class="['message', isBotMessage(message) ? 'bot-message' : 'manager-message']"
+          v-if="!isBotMode || !isClientMessage(message)"
+          :class="['message', getMessageClass(message)]"
         >
-          <!-- Если это подсказка с рекомендацией и примерами -->
-          <div v-if="isBotMessage(message) && isSuggestion(message) && parseSuggestion(message.content)" class="suggestion-content">
+          <!-- Подсказка с рекомендацией (только для бота) -->
+          <div v-if="isBotMode && isBotMessage(message) && isSuggestion(message) && parseSuggestion(message.content)" class="suggestion-content">
             <!-- Секция 1: Сообщение клиента -->
             <div v-if="parseSuggestion(message.content).clientMessage" class="client-message-section">
               <div class="section-title">📩 Сообщение от клиента:</div>
               <div class="client-message-text">{{ parseSuggestion(message.content).clientMessage }}</div>
             </div>
             
-            <!-- Секция 2: Рекомендация (всегда показываем) -->
+            <!-- Секция 2: Рекомендация -->
             <div class="recommendation-section">
               <div class="section-title">💡 Рекомендация:</div>
               <div class="recommendation-text">
@@ -56,7 +52,7 @@
               </div>
             </div>
             
-            <!-- Секция 3: Примеры ответов (всегда показываем) -->
+            <!-- Секция 3: Примеры ответов -->
             <div class="examples-section">
               <div class="section-title">📝 Примеры ответов:</div>
               <div v-if="parseSuggestion(message.content).examples && parseSuggestion(message.content).examples.length > 0">
@@ -83,15 +79,19 @@
           </div>
           <!-- Обычное сообщение -->
           <div v-else class="message-content">{{ message.content }}</div>
-          <div class="message-time">{{ formatTime(message.createdAt) }}</div>
+          <div class="message-meta">
+            <span class="message-sender">{{ message.senderId || 'Unknown' }}</span>
+            <span class="message-time">{{ formatTime(message.createdAt) }}</span>
+          </div>
         </div>
-      </div>
+      </template>
       <div v-if="messages.length === 0" class="empty">
-        Подсказки от бота-компаньона появятся здесь
+        {{ emptyMessage }}
       </div>
     </div>
-    <div class="chat-input">
+    <div class="chat-input" ref="chatInputRef">
       <input 
+        ref="messageInput"
         v-model="inputText" 
         @keyup.enter="handleSend"
         placeholder="Введите сообщение..."
@@ -103,45 +103,85 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted } from 'vue';
+import { ref, computed, onMounted, nextTick, watch } from 'vue';
 import { sendMessage as sendMessageAPI } from '../api/manager.js';
 
 const props = defineProps({
-  clientDialogId: {
+  // Режим: 'client' или 'bot'
+  mode: {
     type: String,
+    default: 'client',
+    validator: (value) => ['client', 'bot'].includes(value)
+  },
+  // Диалог (для режима client)
+  dialog: {
+    type: Object,
     default: null
   },
+  // Сообщения
   messages: {
     type: Array,
     default: () => []
   },
-  companionDialogId: {
+  // ID диалога для отправки сообщений
+  dialogId: {
     type: String,
-    default: null
+    required: true
   },
+  // ID менеджера
   managerUserId: {
     type: String,
     default: 'carl'
   }
 });
 
-const emit = defineEmits(['use-suggestion', 'message-sent']);
+const emit = defineEmits(['use-suggestion']);
 
 const inputText = ref('');
+const chatInputRef = ref(null);
 const messagesContainer = ref(null);
+const messageInput = ref(null);
+
+const isBotMode = computed(() => props.mode === 'bot');
+
+const headerTitle = computed(() => {
+  if (isBotMode.value) {
+    return 'Бот-компаньон';
+  }
+  // Для режима client получаем имя из dialog
+  const members = props.dialog?.members || [];
+  const client = members.find(member => 
+    member.userId !== props.managerUserId && member.type !== 'bot'
+  );
+  return client?.name || props.dialog?.name || 'Клиент';
+});
+
+const headerSubtitle = computed(() => {
+  if (isBotMode.value) {
+    return props.companionDialogId;
+  }
+  const members = props.dialog?.members || [];
+  const client = members.find(member => 
+    member.userId !== props.managerUserId && member.type !== 'bot'
+  );
+  return client?.userId || null;
+});
+
+const emptyMessage = computed(() => {
+  return isBotMode.value 
+    ? 'Подсказки от бота-компаньона появятся здесь'
+    : 'Нет сообщений';
+});
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
   
   let date;
-  // Обрабатываем разные форматы timestamp
   if (typeof timestamp === 'number') {
-    // Если число, проверяем, это миллисекунды или секунды
     date = timestamp > 1000000000000 
       ? new Date(timestamp) 
       : new Date(timestamp * 1000);
   } else if (typeof timestamp === 'string') {
-    // Если строка, пытаемся распарсить
     const numTimestamp = parseFloat(timestamp);
     if (!isNaN(numTimestamp)) {
       date = numTimestamp > 1000000000000 
@@ -154,12 +194,15 @@ const formatTime = (timestamp) => {
     return '';
   }
   
-  // Проверяем, что дата валидна
   if (isNaN(date.getTime())) {
     return '';
   }
   
   return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+};
+
+const isOwnMessage = (message) => {
+  return message.senderId === props.managerUserId;
 };
 
 const isBotMessage = (message) => {
@@ -172,7 +215,6 @@ const isClientMessage = (message) => {
 };
 
 const isSuggestion = (message) => {
-  // Проверяем мета-тег class=suggestion или префикс сообщения (для обратной совместимости)
   return message.meta?.class?.value === 'suggestion' ||
          message.meta?.class === 'suggestion' ||
          message.meta?.isSuggestion?.value === true || 
@@ -183,15 +225,19 @@ const isSuggestion = (message) => {
          ));
 };
 
+const getMessageClass = (message) => {
+  if (isBotMode.value) {
+    return isBotMessage(message) ? 'bot-message' : 'manager-message';
+  }
+  return isOwnMessage(message) ? 'own-message' : '';
+};
+
 const formatClientMessage = (content) => {
-  // Убираем префикс "📩 Сообщение от клиента..." если есть, но оставляем сам текст
   if (content && content.includes('📩 Сообщение от клиента')) {
-    // Ищем паттерн: "📩 Сообщение от клиента [имя]:\n\n[текст]"
     const match = content.match(/📩 Сообщение от клиента[^:]+:\s*\n\n(.*)/s);
     if (match && match[1]) {
       return match[1].trim().replace(/\n/g, '<br>');
     }
-    // Альтернативный паттерн без двойного переноса строки
     const match2 = content.match(/📩 Сообщение от клиента[^:]+:\s*\n(.*)/s);
     if (match2 && match2[1]) {
       return match2[1].trim().replace(/\n/g, '<br>');
@@ -201,7 +247,6 @@ const formatClientMessage = (content) => {
 };
 
 const shouldShowDivider = (messages, index) => {
-  // Показываем разделитель, если предыдущее сообщение другого типа
   if (index === 0) return false;
   
   const current = messages[index];
@@ -212,40 +257,26 @@ const shouldShowDivider = (messages, index) => {
   const previousIsClient = isClientMessage(previous);
   const previousIsSuggestion = isSuggestion(previous) && isBotMessage(previous);
   
-  // Разделитель перед сообщением клиента, если предыдущее не клиентское
   if (currentIsClient && !previousIsClient) return true;
-  
-  // Разделитель перед подсказкой, если предыдущее не подсказка (даже если это сообщение клиента)
   if (currentIsSuggestion && !previousIsSuggestion) return true;
   
   return false;
 };
 
-/**
- * Парсинг подсказки для извлечения сообщения клиента, рекомендации и примеров
- * @param {string} content - Содержимое сообщения с подсказкой
- * @returns {Object|null} - Объект с clientMessage, recommendation и examples, или null если не удалось распарсить
- */
 const parseSuggestion = (content) => {
   if (!content) return null;
   
-  let text = content;
-  
-  // Извлекаем сообщение клиента (секция 1)
-  const clientMessageMatch = text.match(/📩 Сообщение от клиента[^:]+:\s*\n(.*?)(?=\n\n💡|$)/s);
+  const clientMessageMatch = content.match(/📩 Сообщение от клиента[^:]+:\s*\n(.*?)(?=\n\n💡|$)/s);
   const clientMessage = clientMessageMatch ? clientMessageMatch[1].trim() : null;
   
-  // Извлекаем рекомендацию (секция 2)
-  const recommendationMatch = text.match(/💡 Рекомендация:\s*\n(.*?)(?=\n\n📝|$)/s);
+  const recommendationMatch = content.match(/💡 Рекомендация:\s*\n(.*?)(?=\n\n📝|$)/s);
   const recommendation = recommendationMatch ? recommendationMatch[1].trim() : null;
   
-  // Извлекаем примеры (секция 3)
-  const examplesMatch = text.match(/📝 Примеры ответов:\s*\n(.*?)$/s);
+  const examplesMatch = content.match(/📝 Примеры ответов:\s*\n(.*?)$/s);
   let examples = [];
   
   if (examplesMatch) {
     const examplesText = examplesMatch[1];
-    // Ищем примеры в формате "1. [текст]"
     const examplePattern = /^\d+\.\s*(.+?)(?=\n\d+\.|$)/gms;
     let match;
     while ((match = examplePattern.exec(examplesText)) !== null) {
@@ -255,7 +286,6 @@ const parseSuggestion = (content) => {
       }
     }
     
-    // Если не нашли примеры в формате списка, попробуем найти просто пронумерованные строки
     if (examples.length === 0) {
       const lines = examplesText.split('\n').filter(line => line.trim());
       examples = lines
@@ -265,7 +295,6 @@ const parseSuggestion = (content) => {
     }
   }
   
-  // Если не нашли структурированный формат, возвращаем null
   if (!clientMessage && !recommendation && examples.length === 0) {
     return null;
   }
@@ -277,38 +306,42 @@ const parseSuggestion = (content) => {
   };
 };
 
-const handleUseSuggestion = (suggestionText) => {
-  // Убираем префикс "💡 Подсказка для ответа клиенту..."
-  const cleanText = suggestionText.replace(/^💡 Подсказка для ответа клиенту[^:]+:\s*\n\n/, '');
-  emit('use-suggestion', cleanText);
-};
-
-/**
- * Копирование примера ответа в поле ввода
- * @param {string} exampleText - Текст примера для копирования
- */
 const handleCopyExample = (exampleText) => {
   emit('use-suggestion', exampleText);
 };
 
 const handleSend = async () => {
-  if (!inputText.value.trim() || !props.companionDialogId) {
+  if (!inputText.value.trim() || !props.dialogId) {
     return;
   }
   
   try {
-    const response = await sendMessageAPI(props.companionDialogId, inputText.value);
+    const response = await sendMessageAPI(props.dialogId, inputText.value);
     if (response.success) {
       inputText.value = '';
-      emit('message-sent');
       scrollToBottom();
+      // WebSocket автоматически обновит сообщения
     }
   } catch (error) {
     console.error('Error sending message:', error);
   }
 };
 
-// Функция для прокрутки вниз
+// Метод для установки текста и фокуса (для режима client)
+const setInputTextAndFocus = (text) => {
+  inputText.value = text;
+  nextTick(() => {
+    if (messageInput.value) {
+      messageInput.value.focus();
+      messageInput.value.setSelectionRange(text.length, text.length);
+    }
+  });
+};
+
+defineExpose({
+  setInputTextAndFocus
+});
+
 const scrollToBottom = () => {
   nextTick(() => {
     if (messagesContainer.value) {
@@ -317,22 +350,22 @@ const scrollToBottom = () => {
   });
 };
 
-    // Прокручиваем вниз при изменении сообщений
-    watch(() => props.messages, () => {
-      scrollToBottom();
-    }, { deep: true, immediate: false });
+watch(() => props.messages, () => {
+  scrollToBottom();
+}, { deep: true, immediate: false });
 
-// Прокручиваем вниз при монтировании компонента
 onMounted(() => {
   scrollToBottom();
 });
 </script>
 
 <style scoped>
-.companion-bot-chat {
+.chat {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  position: relative;
 }
 
 .chat-header {
@@ -351,8 +384,8 @@ onMounted(() => {
   flex: 1;
 }
 
-.dialog-id {
-  font-size: 0.875rem;
+.header-subtitle {
+  font-size: 0.75rem;
   color: #666;
   font-weight: normal;
   font-family: monospace;
@@ -364,12 +397,12 @@ onMounted(() => {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 0.875rem;
+  padding: 1rem;
   background: #fafafa;
-  min-height: 0; /* Важно для flex */
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.75rem;
 }
 
 .message-divider {
@@ -397,13 +430,31 @@ onMounted(() => {
 }
 
 .message {
-  margin-bottom: 0.75rem;
-  padding: 0.625rem 0.875rem;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  line-height: 1.4;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  max-width: 70%;
+  word-wrap: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
+/* Режим client */
+.message {
+  align-self: flex-start;
+  background: #fff;
+  border-bottom-left-radius: 4px;
+}
+
+.message.own-message {
+  align-self: flex-end;
+  background: #2196f3;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+/* Режим bot */
 .message.manager-message {
   background: #e3f2fd;
   border-left: 3px solid #2196f3;
@@ -428,14 +479,48 @@ onMounted(() => {
 }
 
 .message-content {
+  line-height: 1.4;
+  word-break: break-word;
+  font-size: 0.875rem;
   margin-bottom: 0.375rem;
-  word-wrap: break-word;
+}
+
+.message.own-message .message-content {
+  color: #fff;
+}
+
+.message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+  font-size: 0.75rem;
+  opacity: 0.85;
+  min-height: 1.2rem;
+}
+
+.message-sender {
+  font-family: monospace;
+  font-weight: 500;
+  font-size: 0.75rem;
+  color: inherit;
 }
 
 .message-time {
-  font-size: 0.6875rem;
-  color: #999;
-  margin-bottom: 0.375rem;
+  font-size: 0.75rem;
+  opacity: 0.85;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.message.own-message .message-meta {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.message.own-message .message-sender,
+.message.own-message .message-time {
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .suggestion-content {
@@ -463,13 +548,6 @@ onMounted(() => {
   margin-bottom: 1rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px dashed #e0e0e0;
-}
-
-.no-examples {
-  font-style: italic;
-  color: #999;
-  padding: 0.5rem;
-  text-align: center;
 }
 
 .section-title {
@@ -542,8 +620,11 @@ onMounted(() => {
   background: #388e3c;
 }
 
-.copy-button:active {
-  background: #2e7d32;
+.no-examples {
+  font-style: italic;
+  color: #999;
+  padding: 0.5rem;
+  text-align: center;
 }
 
 .empty {

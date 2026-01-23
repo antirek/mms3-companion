@@ -2,30 +2,30 @@ import { ref } from 'vue';
 import { getDialogMessages, sendMessage as sendMessageAPI } from '../api/manager.js';
 
 export function useCompanionBot() {
-  const companionMessages = ref([]);
-  const companionDialogId = ref(null);
+  const botMessages = ref([]);
+  const botDialogId = ref(null);
   const loading = ref(false);
 
   /**
-   * Загрузка сообщений из диалога с ботом-компаньоном
-   * @param {string} companionBotDialogId - ID диалога с ботом-компаньоном (из meta.companionBotDialogId)
+   * Загрузка сообщений из диалога с ботом-менеджером
+   * @param {string} botDialogIdParam - ID диалога бот-менеджер (из meta.companionBotDialogId)
    */
-  const loadCompanionMessages = async (companionBotDialogId) => {
-    if (!companionBotDialogId) {
-      companionMessages.value = [];
-      companionDialogId.value = null;
+  const loadBotMessages = async (botDialogIdParam) => {
+    if (!botDialogIdParam) {
+      botMessages.value = [];
+      botDialogId.value = null;
       return;
     }
     
-    companionDialogId.value = companionBotDialogId;
+    botDialogId.value = botDialogIdParam;
     
     try {
       loading.value = true;
-      const response = await getDialogMessages(companionBotDialogId);
+      const response = await getDialogMessages(botDialogIdParam);
       
       if (response.success) {
         const messages = response.data || [];
-        companionMessages.value = messages.sort((a, b) => {
+        botMessages.value = messages.sort((a, b) => {
           const timeA = a.createdAt || 0;
           const timeB = b.createdAt || 0;
           const normalizedA = typeof timeA === 'number' 
@@ -37,30 +37,30 @@ export function useCompanionBot() {
           return normalizedA - normalizedB;
         });
       } else {
-        companionMessages.value = [];
+        botMessages.value = [];
       }
     } catch (error) {
-      console.error('Error loading companion messages:', error);
-      companionMessages.value = [];
+      console.error('Error loading bot messages:', error);
+      botMessages.value = [];
     } finally {
       loading.value = false;
     }
   };
 
   /**
-   * Отправка сообщения в диалог с ботом-компаньоном
-   * @param {string} companionBotDialogId - ID диалога с ботом
+   * Отправка сообщения в диалог бот-менеджер
+   * @param {string} botDialogIdParam - ID диалога бот-менеджер
    * @param {string} content - Содержимое сообщения
    */
-  const sendMessage = async (companionBotDialogId, content) => {
-    if (!companionBotDialogId || !content) {
-      return { success: false, error: 'companionBotDialogId и content обязательны' };
+  const sendMessage = async (botDialogIdParam, content) => {
+    if (!botDialogIdParam || !content) {
+      return { success: false, error: 'botDialogId и content обязательны' };
     }
     
     try {
-      const response = await sendMessageAPI(companionBotDialogId, content);
+      const response = await sendMessageAPI(botDialogIdParam, content);
       if (response.success) {
-        await loadCompanionMessages(companionBotDialogId);
+        await loadBotMessages(botDialogIdParam);
       }
       return response;
     } catch (error) {
@@ -68,15 +68,15 @@ export function useCompanionBot() {
     }
   };
 
-  const reloadMessages = async (companionBotDialogId) => {
-    await loadCompanionMessages(companionBotDialogId);
+  const reloadMessages = async (botDialogIdParam) => {
+    await loadBotMessages(botDialogIdParam);
   };
 
   return {
-    companionMessages,
-    companionDialogId,
+    botMessages,
+    botDialogId,
     loading,
-    loadCompanionMessages,
+    loadBotMessages,
     sendMessage,
     reloadMessages
   };

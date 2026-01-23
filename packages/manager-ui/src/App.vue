@@ -8,33 +8,33 @@
         <h2>Список диалогов с клиентами</h2>
         <DialogList 
           :dialogs="dialogs" 
-          :active-dialog-id="activeDialogId"
+          :active-dialog-id="clientDialogId"
           @select-dialog="handleSelectDialog"
         />
       </div>
       <div class="column client-chat">
-        <ClientChat 
-          v-if="activeDialog"
-          ref="clientChatRef"
-          :dialog="activeDialog"
+        <Chat 
+          v-if="clientDialogId"
+          ref="clientManagerChatRef"
+          mode="client"
+          :dialog="clientDialog"
           :messages="clientMessages"
+          :dialog-id="clientDialogId"
           :manager-user-id="managerUserId"
-          @send-message="handleSendMessage"
         />
         <div v-else class="empty-state">
           <p>Выберите диалог для просмотра</p>
         </div>
       </div>
       <div class="column companion-bot-chat">
-        <CompanionBotChat 
-          v-if="activeDialog"
-          :key="`companion-${activeDialogId}-${companionMessages.length}`"
-          :client-dialog-id="activeDialogId"
-          :messages="companionMessages"
-          :companion-dialog-id="companionDialogId"
+        <Chat 
+          v-if="botDialogId"
+          ref="botManagerChatRef"
+          mode="bot"
+          :messages="botMessages"
+          :dialog-id="botDialogId"
           :manager-user-id="managerUserId"
           @use-suggestion="handleUseSuggestion"
-          @message-sent="handleCompanionMessageSent"
         />
         <div v-else class="empty-state">
           <p>Подсказки от бота-компаньона появятся здесь</p>
@@ -50,13 +50,12 @@ import { useManagerChat } from './composables/useManagerChat.js';
 import { useCompanionBot } from './composables/useCompanionBot.js';
 import { useWebSocket } from './composables/useWebSocket.js';
 import DialogList from './components/DialogList.vue';
-import ClientChat from './components/ClientChat.vue';
-import CompanionBotChat from './components/CompanionBotChat.vue';
+import Chat from './components/Chat.vue';
 
 const {
   dialogs,
-  activeDialogId,
-  activeDialog,
+  clientDialogId,
+  clientDialog,
   clientMessages,
   loadDialogs,
   selectDialog,
@@ -67,13 +66,14 @@ const {
 // ID менеджера (можно вынести в конфигурацию)
 const managerUserId = ref('carl');
 
-// Ref для компонента ClientChat
-const clientChatRef = ref(null);
+// Ref для компонентов чатов
+const clientManagerChatRef = ref(null);
+const botManagerChatRef = ref(null);
 
 const {
-  companionMessages,
-  companionDialogId,
-  loadCompanionMessages,
+  botMessages,
+  botDialogId,
+  loadBotMessages,
   reloadMessages
 } = useCompanionBot();
 
@@ -87,22 +87,22 @@ const handleWebSocketMessage = async (data) => {
   const dialogId = data.dialogId;
   const isUpdate = data.type === 'message.updated';
   const messageId = message.messageId || message._id || message.id;
-  const isClientDialog = dialogId === activeDialogId.value;
+  const isClientDialog = dialogId === clientDialogId.value;
   
-  // Проверяем companionDialogId из мета-тегов активного диалога, если он не установлен
-  let currentCompanionDialogId = companionDialogId.value;
-  if (!currentCompanionDialogId && activeDialog.value) {
-    currentCompanionDialogId = activeDialog.value.meta?.companionBotDialogId?.value || 
-                               activeDialog.value.meta?.companionBotDialogId;
+  // Проверяем botDialogId из мета-тегов диалога клиент-менеджер, если он не установлен
+  let currentBotDialogId = botDialogId.value;
+  if (!currentBotDialogId && clientDialog.value) {
+    currentBotDialogId = clientDialog.value.meta?.companionBotDialogId?.value || 
+                         clientDialog.value.meta?.companionBotDialogId;
   }
-  const isCompanionDialog = dialogId === currentCompanionDialogId;
+  const isBotDialog = dialogId === currentBotDialogId;
 
-  if (!isClientDialog && !isCompanionDialog) {
+  if (!isClientDialog && !isBotDialog) {
     loadDialogs();
     return;
   }
 
-  // Обработка сообщения в диалоге с клиентом
+  // Обработка сообщения в диалоге клиент-менеджер
   if (isClientDialog) {
     const existingIndex = clientMessages.value.findIndex(m => 
       (m.messageId || m._id || m.id) === messageId
@@ -114,28 +114,28 @@ const handleWebSocketMessage = async (data) => {
     } else if (!isUpdate && existingIndex === -1) {
       clientMessages.value = [...clientMessages.value, message];
       await nextTick();
-      if (companionDialogId.value) {
-        loadCompanionMessages(companionDialogId.value);
+      if (botDialogId.value) {
+        loadBotMessages(botDialogId.value);
       }
     }
   }
 
-  // Обработка сообщения в диалоге с ботом-компаньоном
-  if (isCompanionDialog) {
-    // Устанавливаем companionDialogId, если он еще не установлен
-    if (!companionDialogId.value && currentCompanionDialogId) {
-      companionDialogId.value = currentCompanionDialogId;
+  // Обработка сообщения в диалоге бот-менеджер
+  if (isBotDialog) {
+    // Устанавливаем botDialogId, если он еще не установлен
+    if (!botDialogId.value && currentBotDialogId) {
+      botDialogId.value = currentBotDialogId;
     }
     
-    const existingIndex = companionMessages.value.findIndex(m => 
+    const existingIndex = botMessages.value.findIndex(m => 
       (m.messageId || m._id || m.id) === messageId
     );
     
     if (isUpdate && existingIndex !== -1) {
-      companionMessages.value[existingIndex] = message;
-      companionMessages.value = [...companionMessages.value];
+      botMessages.value[existingIndex] = message;
+      botMessages.value = [...botMessages.value];
     } else if (!isUpdate && existingIndex === -1) {
-      const newMessages = [...companionMessages.value, message];
+      const newMessages = [...botMessages.value, message];
       newMessages.sort((a, b) => {
         const timeA = a.createdAt || 0;
         const timeB = b.createdAt || 0;
@@ -147,7 +147,7 @@ const handleWebSocketMessage = async (data) => {
           : (typeof timeB === 'string' ? (parseFloat(timeB) || new Date(timeB).getTime() || 0) : 0);
         return normalizedA - normalizedB;
       });
-      companionMessages.value = newMessages;
+      botMessages.value = newMessages;
       await nextTick();
     }
   }
@@ -163,19 +163,19 @@ onMounted(() => {
   loadDialogs();
 });
 
-// При изменении активного диалога загружаем сообщения
-watch(activeDialogId, (newDialogId) => {
+// При изменении диалога клиент-менеджер загружаем сообщения
+watch(clientDialogId, (newDialogId) => {
   if (newDialogId) {
     loadMessages(newDialogId);
-    const clientDialog = dialogs.value.find(d => d.dialogId === newDialogId);
-    const companionBotDialogId = clientDialog?.meta?.companionBotDialogId?.value || 
-                                 clientDialog?.meta?.companionBotDialogId;
+    const dialog = dialogs.value.find(d => d.dialogId === newDialogId);
+    const botDialogIdFromMeta = dialog?.meta?.companionBotDialogId?.value || 
+                                 dialog?.meta?.companionBotDialogId;
     
-    if (companionBotDialogId) {
-      loadCompanionMessages(companionBotDialogId);
+    if (botDialogIdFromMeta) {
+      loadBotMessages(botDialogIdFromMeta);
     } else {
-      companionDialogId.value = null;
-      companionMessages.value = [];
+      botDialogId.value = null;
+      botMessages.value = [];
     }
   }
 });
@@ -184,29 +184,16 @@ const handleSelectDialog = (dialogId) => {
   selectDialog(dialogId);
 };
 
-const handleSendMessage = async (content) => {
-  await sendMessage(content);
-  // Перезагружаем сообщения бота после отправки, если есть companionDialogId
-  if (companionDialogId.value) {
-    loadCompanionMessages(companionDialogId.value);
-  }
-};
-
 const handleUseSuggestion = (suggestionText) => {
   const cleanText = suggestionText.replace(/^💡 Подсказка для ответа клиенту[^:]+:\s*\n\n/, '');
   const finalText = cleanText.replace(/^\*\*Подсказка для менеджера:\*\*\s*\n\n?/, '').trim();
   nextTick(() => {
-    if (clientChatRef.value?.setInputTextAndFocus) {
-      clientChatRef.value.setInputTextAndFocus(finalText);
+    if (clientManagerChatRef.value?.setInputTextAndFocus) {
+      clientManagerChatRef.value.setInputTextAndFocus(finalText);
     }
   });
 };
 
-const handleCompanionMessageSent = () => {
-  if (companionDialogId.value) {
-    reloadMessages(companionDialogId.value);
-  }
-};
 </script>
 
 <style scoped>
