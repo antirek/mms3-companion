@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import { getManagerDialogs, getDialogMessages, sendMessage as sendMessageAPI } from '../api/manager.js';
+import { getManagerDialogs, getDialogMessages } from '../api/manager.js';
 
 export function useManagerChat() {
   const dialogs = ref([]);
@@ -42,22 +42,6 @@ export function useManagerChat() {
     }
   };
 
-  const sendMessage = async (content) => {
-    if (!clientDialogId.value) return;
-    
-    try {
-      const response = await sendMessageAPI(clientDialogId.value, content);
-      if (response.success) {
-        // Добавляем сообщение в список
-        clientMessages.value.push(response.data);
-        // Перезагружаем сообщения
-        await loadMessages(clientDialogId.value);
-      }
-    } catch (error) {
-      console.error('Ошибка при отправке сообщения:', error);
-    }
-  };
-
   return {
     dialogs,
     clientDialogId,
@@ -66,7 +50,6 @@ export function useManagerChat() {
     loading,
     loadDialogs,
     selectDialog,
-    loadMessages,
-    sendMessage
+    loadMessages
   };
 }

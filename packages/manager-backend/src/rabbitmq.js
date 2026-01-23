@@ -186,7 +186,7 @@ export class RabbitMQUpdatesClient {
    */
   async handleUpdate(update) {
     try {
-      const { eventType, data } = update;
+      const { eventType, data, createdAt: updateCreatedAt } = update;
 
       // Логируем ВСЕ события для отладки
       console.log('🔍 [DEBUG] Получен update:', {
@@ -205,6 +205,28 @@ export class RabbitMQUpdatesClient {
         const message = data.message;
         const dialog = data.dialog;
 
+        // Убеждаемся, что у сообщения есть createdAt
+        // Проверяем разные возможные источники времени
+        if (!message.createdAt) {
+          // Пробуем найти время в других полях сообщения
+          const timestamp = message.timestamp || 
+                           message.created_at || 
+                           message.created || 
+                           message.time ||
+                           (message._createdAt && typeof message._createdAt === 'number' ? message._createdAt : null);
+          
+          if (timestamp) {
+            message.createdAt = timestamp;
+          } else if (updateCreatedAt) {
+            // Используем createdAt из самого события
+            message.createdAt = updateCreatedAt;
+          } else {
+            // Если времени нет вообще, используем текущее время
+            message.createdAt = Date.now();
+            console.log('⚠️ [RabbitMQ] У сообщения нет createdAt, установлено текущее время');
+          }
+        }
+
         // Отправляем ВСЕ сообщения, которые относятся к диалогам менеджера
         // (включая сообщения от клиентов, бота-компаньона и самого менеджера)
         console.log(`Получено сообщение для менеджера (${eventType}):`, {
@@ -214,7 +236,9 @@ export class RabbitMQUpdatesClient {
           content: message.content?.substring(0, 50),
           eventType: eventType,
           hasDialog: !!dialog,
-          hasMessage: !!message
+          hasMessage: !!message,
+          hasCreatedAt: !!message.createdAt,
+          createdAt: message.createdAt
         });
 
         // Проверяем, является ли сообщение от клиента (не от менеджера и не от бота)

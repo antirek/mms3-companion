@@ -29,7 +29,6 @@
       <div class="column companion-bot-chat">
         <Chat 
           v-if="botDialogId"
-          ref="botManagerChatRef"
           mode="bot"
           :messages="botMessages"
           :dialog-id="botDialogId"
@@ -59,22 +58,19 @@ const {
   clientMessages,
   loadDialogs,
   selectDialog,
-  loadMessages,
-  sendMessage
+  loadMessages
 } = useManagerChat();
 
 // ID менеджера (можно вынести в конфигурацию)
 const managerUserId = ref('carl');
 
-// Ref для компонентов чатов
+// Ref для компонента чата с клиентом
 const clientManagerChatRef = ref(null);
-const botManagerChatRef = ref(null);
 
 const {
   botMessages,
   botDialogId,
-  loadBotMessages,
-  reloadMessages
+  loadBotMessages
 } = useCompanionBot();
 
 // Обработчик сообщений через WebSocket
@@ -96,6 +92,43 @@ const handleWebSocketMessage = async (data) => {
                          clientDialog.value.meta?.companionBotDialogId;
   }
   const isBotDialog = dialogId === currentBotDialogId;
+
+  // Убеждаемся, что у сообщения есть createdAt
+  // Проверяем разные возможные названия поля времени
+  if (!message.createdAt) {
+    // Пробуем найти время в других полях
+    const timestamp = message.timestamp || 
+                     message.created_at || 
+                     message.created || 
+                     message.time ||
+                     (message._createdAt && typeof message._createdAt === 'number' ? message._createdAt : null);
+    
+    if (timestamp) {
+      message.createdAt = timestamp;
+      console.log('🔧 [WebSocket] Использован timestamp из альтернативного поля:', timestamp);
+    } else {
+      // Если времени нет вообще, используем текущее время
+      message.createdAt = Date.now();
+      console.log('⚠️ [WebSocket] У сообщения нет createdAt, установлено текущее время:', message.createdAt);
+      console.log('📋 [WebSocket] Структура сообщения (первые 10 полей):', Object.keys(message).slice(0, 10));
+    }
+  }
+
+  // Логирование для отладки
+  console.log('🔍 [WebSocket] Сравнение dialogId:', {
+    messageDialogId: dialogId,
+    clientDialogId: clientDialogId.value,
+    botDialogId: botDialogId.value,
+    currentBotDialogId: currentBotDialogId,
+    isClientDialog: isClientDialog,
+    isBotDialog: isBotDialog,
+    clientDialogMeta: clientDialog.value?.meta,
+    messageType: data.type,
+    messageId: messageId,
+    senderId: message.senderId,
+    hasCreatedAt: !!message.createdAt,
+    createdAt: message.createdAt
+  });
 
   if (!isClientDialog && !isBotDialog) {
     loadDialogs();
@@ -122,33 +155,52 @@ const handleWebSocketMessage = async (data) => {
 
   // Обработка сообщения в диалоге бот-менеджер
   if (isBotDialog) {
+    console.log('✅ [WebSocket] Обработка сообщения для бот-диалога:', {
+      messageId,
+      isUpdate,
+      currentBotMessagesCount: botMessages.value.length,
+      botDialogId: botDialogId.value,
+      currentBotDialogId
+    });
+
     // Устанавливаем botDialogId, если он еще не установлен
     if (!botDialogId.value && currentBotDialogId) {
       botDialogId.value = currentBotDialogId;
+      console.log('🔧 [WebSocket] Установлен botDialogId:', currentBotDialogId);
     }
     
     const existingIndex = botMessages.value.findIndex(m => 
       (m.messageId || m._id || m.id) === messageId
     );
     
+    console.log('🔍 [WebSocket] Поиск существующего сообщения:', {
+      messageId,
+      existingIndex,
+      isUpdate,
+      willUpdate: isUpdate && existingIndex !== -1,
+      willAdd: !isUpdate && existingIndex === -1
+    });
+    
     if (isUpdate && existingIndex !== -1) {
+      console.log('🔄 [WebSocket] Обновление существующего сообщения бота');
       botMessages.value[existingIndex] = message;
       botMessages.value = [...botMessages.value];
+      console.log('✅ [WebSocket] Сообщение обновлено, новый count:', botMessages.value.length);
     } else if (!isUpdate && existingIndex === -1) {
-      const newMessages = [...botMessages.value, message];
-      newMessages.sort((a, b) => {
-        const timeA = a.createdAt || 0;
-        const timeB = b.createdAt || 0;
-        const normalizedA = typeof timeA === 'number' 
-          ? (timeA > 1000000000000 ? timeA : timeA * 1000)
-          : (typeof timeA === 'string' ? (parseFloat(timeA) || new Date(timeA).getTime() || 0) : 0);
-        const normalizedB = typeof timeB === 'number'
-          ? (timeB > 1000000000000 ? timeB : timeB * 1000)
-          : (typeof timeB === 'string' ? (parseFloat(timeB) || new Date(timeB).getTime() || 0) : 0);
-        return normalizedA - normalizedB;
+      console.log('➕ [WebSocket] Добавление нового сообщения бота');
+      // Новое сообщение всегда добавляется в конец (оно самое новое)
+      botMessages.value = [...botMessages.value, message];
+      console.log('✅ [WebSocket] Сообщение добавлено в конец, новый count:', botMessages.value.length, {
+        lastMessageId: botMessages.value[botMessages.value.length - 1]?.messageId,
+        messageIds: botMessages.value.map(m => m.messageId || m._id || m.id)
       });
-      botMessages.value = newMessages;
       await nextTick();
+    } else {
+      console.log('⚠️ [WebSocket] Сообщение бота не обработано:', {
+        isUpdate,
+        existingIndex,
+        reason: existingIndex !== -1 ? 'уже существует' : 'неизвестная причина'
+      });
     }
   }
   

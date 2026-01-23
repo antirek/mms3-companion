@@ -90,13 +90,26 @@
       </div>
     </div>
     <div class="chat-input" ref="chatInputRef">
-      <input 
-        ref="messageInput"
-        v-model="inputText" 
-        @keyup.enter="handleSend"
-        placeholder="Введите сообщение..."
-        type="text"
-      />
+      <div class="textarea-wrapper">
+        <textarea 
+          ref="messageInput"
+          v-model="inputText" 
+          @keydown.enter.exact="handleEnterKey"
+          @input="autoResize"
+          placeholder="Введите сообщение..."
+          rows="1"
+          class="message-textarea"
+        ></textarea>
+        <button 
+          v-if="inputText.trim()"
+          @click="clearInput"
+          class="clear-button"
+          type="button"
+          title="Очистить"
+        >
+          ✕
+        </button>
+      </div>
       <button @click="handleSend">Отправить</button>
     </div>
   </div>
@@ -280,7 +293,9 @@ const parseSuggestion = (content) => {
     const examplePattern = /^\d+\.\s*(.+?)(?=\n\d+\.|$)/gms;
     let match;
     while ((match = examplePattern.exec(examplesText)) !== null) {
-      const exampleText = match[1].trim();
+      let exampleText = match[1].trim();
+      // Убираем кавычки-елочки (в начале, в конце и все вхождения)
+      exampleText = exampleText.replace(/^«+|»+$/g, '').replace(/«|»/g, '').trim();
       if (exampleText && exampleText !== 'Примеры не найдены') {
         examples.push(exampleText);
       }
@@ -290,7 +305,12 @@ const parseSuggestion = (content) => {
       const lines = examplesText.split('\n').filter(line => line.trim());
       examples = lines
         .filter(line => /^\d+\./.test(line.trim()) && !line.includes('Примеры не найдены'))
-        .map(line => line.replace(/^\d+\.\s*/, '').trim())
+        .map(line => {
+          let text = line.replace(/^\d+\.\s*/, '').trim();
+          // Убираем кавычки-елочки (в начале, в конце и все вхождения)
+          text = text.replace(/^«+|»+$/g, '').replace(/«|»/g, '').trim();
+          return text;
+        })
         .filter(line => line.length > 0);
     }
   }
@@ -310,6 +330,42 @@ const handleCopyExample = (exampleText) => {
   emit('use-suggestion', exampleText);
 };
 
+const handleEnterKey = (event) => {
+  // Shift+Enter - новая строка, Enter - отправить
+  if (!event.shiftKey) {
+    event.preventDefault();
+    handleSend();
+  }
+};
+
+const clearInput = () => {
+  inputText.value = '';
+  if (messageInput.value) {
+    messageInput.value.style.height = 'auto';
+  }
+  nextTick(() => {
+    if (messageInput.value) {
+      messageInput.value.focus();
+    }
+  });
+};
+
+const autoResize = () => {
+  nextTick(() => {
+    if (messageInput.value) {
+      // Сбрасываем высоту для корректного расчета
+      messageInput.value.style.height = 'auto';
+      // Устанавливаем высоту на основе содержимого
+      const scrollHeight = messageInput.value.scrollHeight;
+      // Максимальная высота (примерно 6 строк)
+      const maxHeight = 150;
+      messageInput.value.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+      // Прокрутка, если текст превышает maxHeight
+      messageInput.value.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
+    }
+  });
+};
+
 const handleSend = async () => {
   if (!inputText.value.trim() || !props.dialogId) {
     return;
@@ -319,6 +375,10 @@ const handleSend = async () => {
     const response = await sendMessageAPI(props.dialogId, inputText.value);
     if (response.success) {
       inputText.value = '';
+      // Сбрасываем высоту textarea
+      if (messageInput.value) {
+        messageInput.value.style.height = 'auto';
+      }
       scrollToBottom();
       // WebSocket автоматически обновит сообщения
     }
@@ -332,7 +392,9 @@ const setInputTextAndFocus = (text) => {
   inputText.value = text;
   nextTick(() => {
     if (messageInput.value) {
+      autoResize();
       messageInput.value.focus();
+      // Для textarea используем setSelectionRange
       messageInput.value.setSelectionRange(text.length, text.length);
     }
   });
@@ -354,8 +416,13 @@ watch(() => props.messages, () => {
   scrollToBottom();
 }, { deep: true, immediate: false });
 
+watch(inputText, () => {
+  autoResize();
+});
+
 onMounted(() => {
   scrollToBottom();
+  autoResize();
 });
 </script>
 
@@ -646,14 +713,56 @@ onMounted(() => {
   z-index: 10;
 }
 
-.chat-input input {
+.chat-input .textarea-wrapper {
   flex: 1;
+  position: relative;
+}
+
+.chat-input .message-textarea {
+  width: 100%;
   padding: 0.5rem;
+  padding-right: 1.75rem;
   border: 1px solid #e0e0e0;
   border-radius: 4px;
   font-size: 0.875rem;
+  font-family: inherit;
   min-height: 40px;
+  max-height: 150px;
   box-sizing: border-box;
+  resize: none;
+  line-height: 1.5;
+  overflow-y: auto;
+}
+
+.chat-input .message-textarea:focus {
+  border-color: #2196f3;
+  outline: none;
+}
+
+.chat-input .clear-button {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #999;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  transition: color 0.2s;
+}
+
+.chat-input .clear-button:hover {
+  color: #333;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 50%;
 }
 
 .chat-input button {

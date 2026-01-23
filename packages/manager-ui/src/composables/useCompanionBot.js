@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import { getDialogMessages, sendMessage as sendMessageAPI } from '../api/manager.js';
+import { getDialogMessages } from '../api/manager.js';
 
 export function useCompanionBot() {
   const botMessages = ref([]);
@@ -47,37 +47,10 @@ export function useCompanionBot() {
     }
   };
 
-  /**
-   * Отправка сообщения в диалог бот-менеджер
-   * @param {string} botDialogIdParam - ID диалога бот-менеджер
-   * @param {string} content - Содержимое сообщения
-   */
-  const sendMessage = async (botDialogIdParam, content) => {
-    if (!botDialogIdParam || !content) {
-      return { success: false, error: 'botDialogId и content обязательны' };
-    }
-    
-    try {
-      const response = await sendMessageAPI(botDialogIdParam, content);
-      if (response.success) {
-        await loadBotMessages(botDialogIdParam);
-      }
-      return response;
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  };
-
-  const reloadMessages = async (botDialogIdParam) => {
-    await loadBotMessages(botDialogIdParam);
-  };
-
   return {
     botMessages,
     botDialogId,
     loading,
-    loadBotMessages,
-    sendMessage,
-    reloadMessages
+    loadBotMessages
   };
 }
