@@ -41,10 +41,10 @@ export class RabbitMQUpdatesClient {
   }
 
   /**
-   * Настройка очереди и подписка на updates для менеджера
-   * @param {string} managerUserId - ID менеджера
+   * Настройка очереди и подписка на updates для бота-компаньона
+   * @param {string} botUserId - ID бота-компаньона
    */
-  async setupQueueForUser(managerUserId) {
+  async setupQueueForBot(botUserId) {
     try {
       if (!this.channel) {
         throw new Error('Канал не создан. Сначала выполните connect()');
@@ -52,12 +52,12 @@ export class RabbitMQUpdatesClient {
 
       const { exchange } = config.rabbitmq;
 
-      // Имя очереди для менеджера
-      const queue = `user_${managerUserId}_updates`;
+      // Имя очереди для бота
+      const queue = `user_${botUserId}_updates`;
       
-      // Routing key для подписки на updates менеджера
-      // Формат: update.dialog.user.manager_1.* (для всех обновлений диалогов)
-      const routingKey = `update.dialog.user.${managerUserId}.*`;
+      // Routing key для подписки на updates бота
+      // Формат: update.dialog.bot.bot_companion.* (для всех обновлений диалогов бота)
+      const routingKey = `update.dialog.bot.${botUserId}.*`;
 
       // Убеждаемся, что очередь существует
       await this.channel.assertQueue(queue, {
@@ -129,9 +129,9 @@ export class RabbitMQUpdatesClient {
    * Настройка очереди и подписка на updates для бота (старый метод, оставлен для совместимости)
    */
   async setupQueue() {
-    // Для companion-bot используем setupQueueForUser
-    const managerUserId = config.manager.userId;
-    return this.setupQueueForUser(managerUserId);
+    // Для companion-bot используем setupQueueForBot с ID бота
+    const botUserId = config.companionBot?.userId || 'bot_companion';
+    return this.setupQueueForBot(botUserId);
   }
 
   /**

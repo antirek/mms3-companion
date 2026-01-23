@@ -34,12 +34,11 @@ export function useManagerChat() {
     try {
       const response = await getDialogMessages(dialogId);
       if (response.success) {
-        // Переворачиваем массив, чтобы старые сообщения были сверху, новые снизу
         const messages = Array.isArray(response.data) ? response.data : [];
         clientMessages.value = [...messages].reverse();
       }
     } catch (error) {
-      console.error('Ошибка при загрузке сообщений:', error);
+      console.error('Error loading messages:', error);
     }
   };
 

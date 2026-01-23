@@ -21,8 +21,3 @@ export async function sendMessage(dialogId, content) {
   const response = await api.post(`/messages/${dialogId}`, { content });
   return response.data;
 }
-
-export async function getDialogMembers(dialogId) {
-  const response = await api.get(`/dialogs/${dialogId}/members`);
-  return response.data;
-}

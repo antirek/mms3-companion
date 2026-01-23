@@ -1,5 +1,8 @@
 import amqp from 'amqplib';
 import { config } from './config.js';
+import { CompanionBotService } from './services/companionBotService.js';
+import { GigaChatService } from './services/gigachatService.js';
+import { FileService } from './services/fileService.js';
 
 /**
  * Клиент для получения обновлений из RabbitMQ для менеджера
@@ -10,6 +13,24 @@ export class RabbitMQUpdatesClient {
     this.channel = null;
     this.isConnected = false;
     this.broadcastCallback = null;
+    this.companionBotService = null;
+    this.gigachatService = null;
+    this.fileService = null;
+    this.chat3Client = null;
+  }
+
+  /**
+   * Установка сервисов
+   * @param {CompanionBotService} companionBotService - Сервис для работы с ботом-компаньоном
+   * @param {GigaChatService} gigachatService - Сервис для работы с GigaChat
+   * @param {FileService} fileService - Сервис для работы с файлами
+   * @param {Chat3Client} chat3Client - Клиент Chat3 API
+   */
+  setServices(companionBotService, gigachatService, fileService, chat3Client) {
+    this.companionBotService = companionBotService;
+    this.gigachatService = gigachatService;
+    this.fileService = fileService;
+    this.chat3Client = chat3Client;
   }
 
   /**
@@ -71,17 +92,14 @@ export class RabbitMQUpdatesClient {
       // Routing keys для подписки на updates менеджера и бота-компаньона
       // Подписываемся на все возможные варианты для надежности
       // Формат: update.{category}.{userType}.{userId}.{updateType}
+      // ВАЖНО: Manager-backend должен получать ВСЕ updates для менеджера,
+      // включая сообщения от клиентов в диалогах, где менеджер является участником
       const routingKeys = [
-        // Updates для менеджера
-        `update.dialog.user.${managerUserId}.*`,      // Для user типа
-        `update.dialog.*.${managerUserId}.*`,         // Для любого типа (wildcard)
-        `update.*.user.${managerUserId}.*`,            // Для всех категорий, user типа
-        `update.*.*.${managerUserId}.*`,               // Для всех категорий и типов
-        // Updates для бота-компаньона (чтобы получать его сообщения в диалогах с менеджером)
-        `update.dialog.bot.${companionBotUserId}.*`,   // Для bot типа
-        `update.dialog.*.${companionBotUserId}.*`,      // Для любого типа (wildcard)
-        `update.*.bot.${companionBotUserId}.*`,         // Для всех категорий, bot типа
-        `update.*.*.${companionBotUserId}.*`            // Для всех категорий и типов
+        // Updates для менеджера (все сообщения в диалогах, где менеджер является участником)
+        // Это включает сообщения от клиентов, бота и самого менеджера
+        `update.dialog.user.${managerUserId}.*`,      // Для user типа менеджера
+        // Updates для бота-компаньона (чтобы видеть сообщения бота в диалогах с менеджером)
+        // `update.dialog.bot.${companionBotUserId}.*`,   // Для bot типа бота-компаньона
       ];
 
       // Убеждаемся, что очередь существует
@@ -114,13 +132,29 @@ export class RabbitMQUpdatesClient {
           if (msg !== null) {
             try {
               const content = JSON.parse(msg.content.toString());
-              console.log('Получен update из очереди для менеджера:', {
+              // Логируем ВСЕ Update для диагностики
+              const logData = {
                 eventType: content.eventType,
+                userId: content.userId,
+                entityId: content.entityId,
                 dialogId: content.data?.dialog?.dialogId,
                 messageId: content.data?.message?.messageId,
                 senderId: content.data?.message?.senderId,
                 content: content.data?.message?.content?.substring(0, 50),
-              });
+                hasData: !!content.data,
+                hasMessage: !!content.data?.message,
+                hasDialog: !!content.data?.dialog
+              };
+              
+              // Особое логирование для сообщений от клиентов в диалогах с менеджером
+              if (content.eventType === 'message.create' && 
+                  content.data?.message?.senderId && 
+                  content.data?.message?.senderId !== config.manager.userId &&
+                  content.data?.message?.senderId !== config.companionBot?.userId) {
+                console.log('🔴 [КРИТИЧНО] Получен update для сообщения от клиента:', logData);
+              } else {
+                console.log('📥 Получен update из очереди для менеджера:', logData);
+              }
 
               // Обрабатываем update
               await this.handleUpdate(content);
@@ -154,29 +188,56 @@ export class RabbitMQUpdatesClient {
     try {
       const { eventType, data } = update;
 
-      // Обрабатываем только события создания сообщений
-      if (eventType === 'message.create' && data && data.message) {
+      // Логируем ВСЕ события для отладки
+      console.log('🔍 [DEBUG] Получен update:', {
+        eventType: eventType,
+        hasData: !!data,
+        hasMessage: !!data?.message,
+        hasDialog: !!data?.dialog,
+        dialogId: data?.dialog?.dialogId,
+        messageId: data?.message?.messageId,
+        senderId: data?.message?.senderId,
+        content: data?.message?.content?.substring(0, 50)
+      });
+
+      // Обрабатываем события создания и обновления сообщений
+      if ((eventType === 'message.create' || eventType === 'message.update') && data && data.message) {
         const message = data.message;
         const dialog = data.dialog;
 
         // Отправляем ВСЕ сообщения, которые относятся к диалогам менеджера
         // (включая сообщения от клиентов, бота-компаньона и самого менеджера)
-        console.log('Получено новое сообщение для менеджера:', {
+        console.log(`Получено сообщение для менеджера (${eventType}):`, {
           dialogId: dialog?.dialogId,
           messageId: message.messageId,
           senderId: message.senderId,
           content: message.content?.substring(0, 50),
+          eventType: eventType,
+          hasDialog: !!dialog,
+          hasMessage: !!message
         });
+
+        // Проверяем, является ли сообщение от клиента (не от менеджера и не от бота)
+        const isClientMessage = message.senderId !== config.manager.userId && 
+                                message.senderId !== config.companionBot.userId;
+
+        // Если сообщение от клиента и это создание (не обновление), обрабатываем его для генерации рекомендации
+        if (eventType === 'message.create' && isClientMessage && this.companionBotService && this.gigachatService && this.fileService) {
+          this.handleClientMessage(message, dialog).catch(error => {
+            console.error('Ошибка при обработке сообщения от клиента:', error);
+          });
+        }
 
         // Отправляем обновление через WebSocket
         if (this.broadcastCallback) {
-          console.log('Отправка сообщения через WebSocket:', {
+          const wsType = eventType === 'message.create' ? 'message.created' : 'message.updated';
+          console.log(`Отправка сообщения через WebSocket (${wsType}):`, {
             dialogId: dialog?.dialogId,
             messageId: message.messageId,
             senderId: message.senderId
           });
           this.broadcastCallback({
-            type: 'message.created',
+            type: wsType,
             dialogId: dialog?.dialogId,
             message: message,
             dialog: dialog
@@ -188,6 +249,176 @@ export class RabbitMQUpdatesClient {
       }
     } catch (error) {
       console.error('Ошибка при обработке update:', error);
+    }
+  }
+
+  /**
+   * Обработка сообщения от клиента
+   * @param {Object} message - Сообщение от клиента
+   * @param {Object} dialog - Диалог
+   */
+  async handleClientMessage(message, dialog) {
+    try {
+      const clientUserId = message.senderId;
+      const clientName = message.senderInfo?.name || clientUserId;
+      const clientDialogId = dialog.dialogId;
+      const clientMessageContent = message.content;
+
+      console.log(`🤖 Обработка сообщения от клиента ${clientName} (${clientUserId}) в диалоге ${clientDialogId}`);
+
+      // Сначала проверяем, есть ли companionBotDialogId в мета-тегах диалога
+      let companionDialogId = null;
+      const dialogMeta = dialog.meta || {};
+      
+      // Проверяем разные варианты хранения companionBotDialogId в мета-тегах
+      companionDialogId = dialogMeta.companionBotDialogId?.value || 
+                         dialogMeta.companionBotDialogId || 
+                         null;
+
+      if (companionDialogId) {
+        console.log(`✅ Найден companionBotDialogId в мета-тегах диалога: ${companionDialogId}`);
+        // Используем его напрямую, без дополнительных проверок
+        // Если диалог не существует, это будет видно при попытке отправить сообщение
+      }
+
+      // Если companionBotDialogId не найден в мета-тегах или диалог не существует, получаем/создаем через сервис
+      if (!companionDialogId) {
+        console.log(`🔍 companionBotDialogId не найден в мета-тегах, получаем/создаем через сервис...`);
+        const companionDialogResult = await this.companionBotService.getOrCreateCompanionDialog(
+          clientDialogId,
+          clientUserId,
+          clientName
+        );
+
+        if (!companionDialogResult.success) {
+          console.error('Не удалось получить/создать диалог с ботом-компаньоном:', companionDialogResult.error);
+          return;
+        }
+
+        const companionDialog = companionDialogResult.dialog;
+        companionDialogId = companionDialog.dialogId || companionDialog._id || companionDialog.id;
+        console.log(`✅ Диалог с ботом-компаньоном получен/создан: ${companionDialogId}`);
+      }
+
+      // Получаем контекст диалога (последние 10 сообщений)
+      let contextMessages = [];
+      try {
+        const messagesResult = await this.chat3Client.getDialogMessages(clientDialogId, {
+          limit: 10,
+          sort: '(createdAt,desc)'
+        });
+        // getDialogMessages может вернуть массив или объект с data
+        if (Array.isArray(messagesResult)) {
+          contextMessages = messagesResult;
+        } else if (messagesResult && messagesResult.data) {
+          contextMessages = Array.isArray(messagesResult.data) ? messagesResult.data : [];
+        } else if (messagesResult && Array.isArray(messagesResult)) {
+          contextMessages = messagesResult;
+        }
+        // Сортируем по createdAt по возрастанию для правильного контекста
+        contextMessages = contextMessages.reverse();
+      } catch (error) {
+        console.warn('Не удалось получить контекст диалога:', error.message);
+      }
+
+      // Получаем все file_id загруженных файлов
+      const fileIds = await this.fileService.getAllUploadedFileIds();
+      console.log(`📎 Используется ${fileIds.length} файлов для контекста`);
+
+      // Генерируем рекомендацию через GigaChat
+      console.log(`🤖 Генерация рекомендации для ответа клиенту...`);
+      const suggestionResult = await this.gigachatService.generateSuggestion(
+        clientMessageContent,
+        contextMessages,
+        fileIds,
+        clientName,
+        config.manager.userId
+      );
+
+      if (!suggestionResult.success) {
+        console.error('Не удалось сгенерировать рекомендацию:', suggestionResult.error);
+        return;
+      }
+
+      // Формируем сообщение с 3 секциями:
+      // 1. Сообщение клиента (первые 200 символов)
+      // 2. Рекомендация AI
+      // 3. Примеры ответов
+      const clientMessagePreview = clientMessageContent.length > 200
+        ? clientMessageContent.substring(0, 200) + '...'
+        : clientMessageContent;
+
+      // Парсим ответ AI для извлечения рекомендации и примеров
+      const aiResponse = suggestionResult.text || '';
+      
+      // Извлекаем рекомендацию
+      const recommendationMatch = aiResponse.match(/\*\*РЕКОМЕНДАЦИЯ:\*\*\s*\n(.*?)(?=\*\*ПРИМЕРЫ|$)/s);
+      const recommendation = recommendationMatch ? recommendationMatch[1].trim() : '';
+      
+      // Извлекаем примеры
+      const examplesMatch = aiResponse.match(/\*\*ПРИМЕРЫ ОТВЕТОВ:\*\*\s*\n(.*?)$/s);
+      let examples = [];
+      if (examplesMatch) {
+        const examplesText = examplesMatch[1];
+        const examplePattern = /^\d+\.\s*(.+?)(?=\n\d+\.|$)/gms;
+        let match;
+        while ((match = examplePattern.exec(examplesText)) !== null) {
+          const exampleText = match[1].trim();
+          if (exampleText) {
+            examples.push(exampleText);
+          }
+        }
+      }
+
+      // Проверяем, есть ли реальная рекомендация или примеры
+      const hasValidRecommendation = recommendation && 
+                                     recommendation !== 'нет рекомендации' && 
+                                     recommendation.length > 0;
+      const hasValidExamples = examples.length > 0;
+
+      // Не отправляем сообщение, если нет ни рекомендации, ни примеров
+      if (!hasValidRecommendation && !hasValidExamples) {
+        console.log('⚠️ Пропускаем отправку сообщения: нет рекомендации и примеров');
+        return;
+      }
+
+      // Формируем финальное сообщение с 3 секциями
+      const messageParts = [
+        `📩 Сообщение от клиента ${clientName}:`,
+        clientMessagePreview,
+        '',
+        `💡 Рекомендация:`,
+        recommendation || 'нет рекомендации',
+        '',
+        `📝 Примеры ответов:`
+      ];
+
+      // Добавляем примеры
+      if (examples.length > 0) {
+        examples.forEach((example, index) => {
+          messageParts.push(`${index + 1}. ${example}`);
+        });
+      } else {
+        messageParts.push('нет примеров');
+      }
+
+      const suggestionText = messageParts.join('\n');
+
+      // Отправляем сообщение от имени бота в диалог менеджер-бот с мета-тегом
+      const sendResult = await this.companionBotService.sendMessageFromBot(
+        companionDialogId,
+        suggestionText,
+        { class: 'suggestion' } // Мета-тег для определения типа сообщения
+      );
+
+      if (!sendResult.success) {
+        console.error('Не удалось отправить рекомендацию:', sendResult.error);
+        return;
+      }
+
+      console.log(`✅ Рекомендация отправлена в диалог с ботом-компаньоном: ${companionDialogId}`);
+    } catch (error) {
+      console.error('Ошибка при обработке сообщения от клиента:', error);
     }
   }
 

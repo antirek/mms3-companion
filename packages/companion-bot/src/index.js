@@ -94,18 +94,18 @@ async function start() {
     // Подключаемся к RabbitMQ
     await bot.connect();
 
-    // Настраиваем очередь для менеджера (подписываемся на обновления менеджера)
-    await bot.setupQueueForUser(managerUserId);
+    // Настраиваем очередь для бота (подписываемся на обновления бота-компаньона)
+    await bot.setupQueueForBot(companionBotUserId);
 
     console.log('Companion-bot успешно запущен и готов к работе');
-    console.log(`Ожидание updates для менеджера из очереди: user_${managerUserId}_updates`);
+    console.log(`Ожидание updates для бота из очереди: user_${companionBotUserId}_updates`);
 
     // Периодическая проверка соединения
     setInterval(() => {
       if (!bot.isReady()) {
         console.warn('Соединение с RabbitMQ потеряно, попытка переподключения...');
         bot.connect()
-          .then(() => bot.setupQueue())
+          .then(() => bot.setupQueueForBot(companionBotUserId))
           .catch((error) => console.error('Ошибка переподключения:', error));
       }
     }, 30000); // Проверка каждые 30 секунд

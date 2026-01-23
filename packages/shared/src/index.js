@@ -6,3 +6,6 @@ export { File } from './models/File.js';
 
 // Clients
 export { GigaChatFileClient } from './clients/gigachatFileClient.js';
+
+// Services
+export { GigaChatService } from './services/gigachatService.js';

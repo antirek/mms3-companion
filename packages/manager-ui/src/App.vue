@@ -28,9 +28,10 @@
       <div class="column companion-bot-chat">
         <CompanionBotChat 
           v-if="activeDialog"
+          :key="`companion-${activeDialogId}-${companionMessages.length}`"
           :client-dialog-id="activeDialogId"
           :messages="companionMessages"
-          :companion-dialog-id="companionBotDialog?.dialogId || companionDialogId"
+          :companion-dialog-id="companionDialogId"
           :manager-user-id="managerUserId"
           @use-suggestion="handleUseSuggestion"
           @message-sent="handleCompanionMessageSent"
@@ -72,110 +73,86 @@ const clientChatRef = ref(null);
 const {
   companionMessages,
   companionDialogId,
-  companionBotDialog,
   loadCompanionMessages,
-  loadCompanionBotDialog,
   reloadMessages
 } = useCompanionBot();
 
 // Обработчик сообщений через WebSocket
-const handleWebSocketMessage = (data) => {
-  console.log('Обработка WebSocket сообщения:', data);
+const handleWebSocketMessage = async (data) => {
+  if ((data.type !== 'message.created' && data.type !== 'message.updated') || !data.message || !data.dialogId) {
+    return;
+  }
+
+  const message = data.message;
+  const dialogId = data.dialogId;
+  const isUpdate = data.type === 'message.updated';
+  const messageId = message.messageId || message._id || message.id;
+  const isClientDialog = dialogId === activeDialogId.value;
   
-  if (data.type === 'message.created' && data.message) {
-    const message = data.message;
-    const dialogId = data.dialogId;
+  // Проверяем companionDialogId из мета-тегов активного диалога, если он не установлен
+  let currentCompanionDialogId = companionDialogId.value;
+  if (!currentCompanionDialogId && activeDialog.value) {
+    currentCompanionDialogId = activeDialog.value.meta?.companionBotDialogId?.value || 
+                               activeDialog.value.meta?.companionBotDialogId;
+  }
+  const isCompanionDialog = dialogId === currentCompanionDialogId;
+
+  if (!isClientDialog && !isCompanionDialog) {
+    loadDialogs();
+    return;
+  }
+
+  // Обработка сообщения в диалоге с клиентом
+  if (isClientDialog) {
+    const existingIndex = clientMessages.value.findIndex(m => 
+      (m.messageId || m._id || m.id) === messageId
+    );
     
-    console.log('Получено новое сообщение:', {
-      dialogId,
-      activeDialogId: activeDialogId.value,
-      companionBotDialogId: companionBotDialog.value?.dialogId,
-      messageId: message.messageId,
-      senderId: message.senderId
-    });
-    
-    // Проверяем, является ли это сообщением в диалоге с ботом-компаньоном
-    const companionBotDialogId = companionBotDialog.value?.dialogId || companionDialogId.value;
-    const isCompanionBotMessage = dialogId === companionBotDialogId;
-    
-    // Если это сообщение в активном диалоге с клиентом, добавляем его в список
-    if (dialogId === activeDialogId.value && !isCompanionBotMessage) {
-      // Проверяем, нет ли уже такого сообщения (избегаем дубликатов)
-      const exists = clientMessages.value.some(m => 
-        (m.messageId || m._id) === (message.messageId || message._id)
-      );
-      
-      if (!exists) {
-        console.log('Добавляем сообщение клиента в список:', message.messageId);
-        clientMessages.value.push(message);
-        // Перезагружаем подсказки от бота
-        loadCompanionMessages(dialogId);
-      } else {
-        console.log('Сообщение клиента уже существует в списке');
-      }
-    } 
-    // Если это сообщение в диалоге с ботом-компаньоном для активного клиента
-    else if (isCompanionBotMessage && activeDialogId.value) {
-      // Проверяем, нет ли уже такого сообщения (избегаем дубликатов)
-      const exists = companionMessages.value.some(m => 
-        (m.messageId || m._id) === (message.messageId || message._id)
-      );
-      
-      if (!exists) {
-        console.log('Добавляем сообщение бота в список:', message.messageId);
-        // Создаем новый массив для правильной реактивности Vue
-        const newMessages = [...companionMessages.value, message];
-        // Сортируем сообщения по createdAt после добавления нового
-        newMessages.sort((a, b) => {
-          const timeA = a.createdAt || 0;
-          const timeB = b.createdAt || 0;
-          
-          // Нормализуем timestamp
-          let normalizedA = 0;
-          let normalizedB = 0;
-          
-          if (typeof timeA === 'number') {
-            normalizedA = timeA > 1000000000000 ? timeA : timeA * 1000;
-          } else if (typeof timeA === 'string') {
-            const numA = parseFloat(timeA);
-            if (!isNaN(numA)) {
-              normalizedA = numA > 1000000000000 ? numA : numA * 1000;
-            } else {
-              normalizedA = new Date(timeA).getTime() || 0;
-            }
-          }
-          
-          if (typeof timeB === 'number') {
-            normalizedB = timeB > 1000000000000 ? timeB : timeB * 1000;
-          } else if (typeof timeB === 'string') {
-            const numB = parseFloat(timeB);
-            if (!isNaN(numB)) {
-              normalizedB = numB > 1000000000000 ? numB : numB * 1000;
-            } else {
-              normalizedB = new Date(timeB).getTime() || 0;
-            }
-          }
-          
-          return normalizedA - normalizedB; // По возрастанию (старые сверху, новые снизу)
-        });
-        // Присваиваем новый массив для триггера реактивности
-        companionMessages.value = newMessages;
-        console.log('Сообщение бота добавлено, всего сообщений:', companionMessages.value.length);
-      } else {
-        console.log('Сообщение бота уже существует в списке');
-      }
-    } else {
-      console.log('Сообщение не в активном диалоге, обновляем список диалогов');
-      // Если сообщение не в активном диалоге, но это сообщение в диалоге с ботом,
-      // перезагружаем сообщения бота для активного диалога
-      if (activeDialogId.value) {
-        loadCompanionMessages(activeDialogId.value);
+    if (isUpdate && existingIndex !== -1) {
+      clientMessages.value[existingIndex] = message;
+      clientMessages.value = [...clientMessages.value];
+    } else if (!isUpdate && existingIndex === -1) {
+      clientMessages.value = [...clientMessages.value, message];
+      await nextTick();
+      if (companionDialogId.value) {
+        loadCompanionMessages(companionDialogId.value);
       }
     }
-    
-    // Обновляем список диалогов для обновления последнего сообщения
-    loadDialogs();
   }
+
+  // Обработка сообщения в диалоге с ботом-компаньоном
+  if (isCompanionDialog) {
+    // Устанавливаем companionDialogId, если он еще не установлен
+    if (!companionDialogId.value && currentCompanionDialogId) {
+      companionDialogId.value = currentCompanionDialogId;
+    }
+    
+    const existingIndex = companionMessages.value.findIndex(m => 
+      (m.messageId || m._id || m.id) === messageId
+    );
+    
+    if (isUpdate && existingIndex !== -1) {
+      companionMessages.value[existingIndex] = message;
+      companionMessages.value = [...companionMessages.value];
+    } else if (!isUpdate && existingIndex === -1) {
+      const newMessages = [...companionMessages.value, message];
+      newMessages.sort((a, b) => {
+        const timeA = a.createdAt || 0;
+        const timeB = b.createdAt || 0;
+        const normalizedA = typeof timeA === 'number' 
+          ? (timeA > 1000000000000 ? timeA : timeA * 1000)
+          : (typeof timeA === 'string' ? (parseFloat(timeA) || new Date(timeA).getTime() || 0) : 0);
+        const normalizedB = typeof timeB === 'number'
+          ? (timeB > 1000000000000 ? timeB : timeB * 1000)
+          : (typeof timeB === 'string' ? (parseFloat(timeB) || new Date(timeB).getTime() || 0) : 0);
+        return normalizedA - normalizedB;
+      });
+      companionMessages.value = newMessages;
+      await nextTick();
+    }
+  }
+  
+  loadDialogs();
 };
 
 // Подключаемся к WebSocket
@@ -189,12 +166,17 @@ onMounted(() => {
 // При изменении активного диалога загружаем сообщения
 watch(activeDialogId, (newDialogId) => {
   if (newDialogId) {
-    // Загружаем сообщения клиента
     loadMessages(newDialogId);
-    // Загружаем диалог с ботом (получаем dialogId)
-    loadCompanionBotDialog(newDialogId);
-    // Загружаем сообщения бота-компаньона
-    loadCompanionMessages(newDialogId);
+    const clientDialog = dialogs.value.find(d => d.dialogId === newDialogId);
+    const companionBotDialogId = clientDialog?.meta?.companionBotDialogId?.value || 
+                                 clientDialog?.meta?.companionBotDialogId;
+    
+    if (companionBotDialogId) {
+      loadCompanionMessages(companionBotDialogId);
+    } else {
+      companionDialogId.value = null;
+      companionMessages.value = [];
+    }
   }
 });
 
@@ -204,31 +186,25 @@ const handleSelectDialog = (dialogId) => {
 
 const handleSendMessage = async (content) => {
   await sendMessage(content);
-  // Перезагружаем сообщения после отправки
-  if (activeDialogId.value) {
-    loadCompanionMessages(activeDialogId.value);
+  // Перезагружаем сообщения бота после отправки, если есть companionDialogId
+  if (companionDialogId.value) {
+    loadCompanionMessages(companionDialogId.value);
   }
 };
 
 const handleUseSuggestion = (suggestionText) => {
-  // Убираем префикс "💡 Подсказка для ответа клиенту..." если есть
   const cleanText = suggestionText.replace(/^💡 Подсказка для ответа клиенту[^:]+:\s*\n\n/, '');
-  
-  // Убираем также "**Подсказка для менеджера:**" если есть
   const finalText = cleanText.replace(/^\*\*Подсказка для менеджера:\*\*\s*\n\n?/, '').trim();
-  
-  // Устанавливаем текст в поле ввода и переключаем фокус
   nextTick(() => {
-    if (clientChatRef.value && clientChatRef.value.setInputTextAndFocus) {
+    if (clientChatRef.value?.setInputTextAndFocus) {
       clientChatRef.value.setInputTextAndFocus(finalText);
     }
   });
 };
 
 const handleCompanionMessageSent = () => {
-  // Перезагружаем сообщения после отправки
-  if (activeDialogId.value) {
-    reloadMessages(activeDialogId.value);
+  if (companionDialogId.value) {
+    reloadMessages(companionDialogId.value);
   }
 };
 </script>

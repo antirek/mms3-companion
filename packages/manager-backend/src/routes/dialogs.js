@@ -1,5 +1,5 @@
 import express from 'express';
-import { getManagerDialogs, getDialog, getDialogMembers } from '../controllers/dialogsController.js';
+import { getManagerDialogs, getDialog } from '../controllers/dialogsController.js';
 
 const router = express.Router();
 
@@ -8,8 +8,5 @@ router.get('/', getManagerDialogs);
 
 // GET /api/dialogs/:dialogId - получение диалога
 router.get('/:dialogId', getDialog);
-
-// GET /api/dialogs/:dialogId/members - получение участников диалога
-router.get('/:dialogId/members', getDialogMembers);
 
 export default router;

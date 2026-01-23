@@ -5,9 +5,11 @@ import { WebSocketServer } from 'ws';
 import { config } from './config.js';
 import { Chat3Client } from 'chat3-client';
 import { RabbitMQUpdatesClient } from './rabbitmq.js';
+import { CompanionBotService } from './services/companionBotService.js';
+import { GigaChatService } from './services/gigachatService.js';
+import { FileService } from './services/fileService.js';
 import dialogsRouter from './routes/dialogs.js';
 import messagesRouter from './routes/messages.js';
-import companionBotRouter from './routes/companionBot.js';
 
 const app = express();
 
@@ -24,14 +26,14 @@ const chat3Client = new Chat3Client({
   debug: false,
 });
 
-// Передаем клиент в роуты
+// Передаем клиент и сервисы в роуты
 app.locals.chat3Client = chat3Client;
 app.locals.managerUserId = config.manager.userId;
+app.locals.companionBotUserId = config.companionBot.userId;
 
 // API routes
 app.use('/api/dialogs', dialogsRouter);
 app.use('/api/messages', messagesRouter);
-app.use('/api/companion-bot', companionBotRouter);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -71,18 +73,60 @@ wss.on('connection', (ws, req) => {
 // Функция для broadcast сообщений всем клиентам
 const broadcast = (data) => {
   const message = JSON.stringify(data);
+  console.log(`[WebSocket Broadcast] Отправка сообщения ${data.type} всем клиентам:`, {
+    type: data.type,
+    dialogId: data.dialogId,
+    messageId: data.message?.messageId,
+    clientsCount: clients.size,
+    messageLength: message.length
+  });
+  
+  let sentCount = 0;
   clients.forEach((client) => {
     if (client.readyState === 1) { // WebSocket.OPEN
-      client.send(message);
+      try {
+        client.send(message);
+        sentCount++;
+        console.log(`[WebSocket Broadcast] ✅ Сообщение отправлено клиенту (${sentCount}/${clients.size})`);
+      } catch (error) {
+        console.error(`[WebSocket Broadcast] ❌ Ошибка при отправке клиенту:`, error);
+      }
+    } else {
+      console.warn(`[WebSocket Broadcast] ⚠️ Клиент не готов (readyState: ${client.readyState})`);
     }
   });
+  
+  console.log(`[WebSocket Broadcast] Итого отправлено: ${sentCount} из ${clients.size} клиентов`);
 };
 
 app.locals.broadcast = broadcast;
 
+// Инициализация сервисов
+const companionBotService = new CompanionBotService();
+companionBotService.init(chat3Client);
+
+// Передаем сервис в app.locals для использования в контроллерах
+app.locals.companionBotService = companionBotService;
+
+const gigachatService = new GigaChatService();
+if (config.gigachat.clientId && config.gigachat.clientSecret) {
+  gigachatService.init(config.gigachat.clientId, config.gigachat.clientSecret, {
+    model: config.gigachat.model,
+    temperature: config.gigachat.temperature,
+    maxTokens: config.gigachat.maxTokens,
+    topP: config.gigachat.topP,
+  });
+  console.log('GigaChatService инициализирован');
+} else {
+  console.warn('GigaChat Client ID или Client Secret не настроены, генерация рекомендаций будет недоступна');
+}
+
+const fileService = new FileService();
+
 // Инициализация RabbitMQ клиента для получения обновлений
 const rabbitmqClient = new RabbitMQUpdatesClient();
 rabbitmqClient.setBroadcastCallback(broadcast);
+rabbitmqClient.setServices(companionBotService, gigachatService, fileService, chat3Client);
 
 // Подключение к RabbitMQ и настройка очереди
 (async () => {

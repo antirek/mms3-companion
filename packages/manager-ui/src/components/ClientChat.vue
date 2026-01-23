@@ -32,7 +32,6 @@
 
 <script setup>
 import { ref, onMounted, nextTick, computed, watch } from 'vue';
-import { getDialogMembers } from '../api/manager.js';
 
 const props = defineProps({
   dialog: {
@@ -55,16 +54,13 @@ const inputText = ref('');
 const chatInputRef = ref(null);
 const messagesContainer = ref(null);
 const messageInput = ref(null);
-const dialogMembers = ref([]);
 
-// Получаем userId контакта (не менеджера)
+// Получаем userId контакта (не менеджера) из members диалога
 const clientUserId = computed(() => {
-  if (!dialogMembers.value || dialogMembers.value.length === 0) {
-    return null;
-  }
+  const members = props.dialog?.members || [];
   
   // Находим участника, который не является менеджером
-  const client = dialogMembers.value.find(member => 
+  const client = members.find(member => 
     member.userId !== props.managerUserId && member.type !== 'bot'
   );
   
@@ -72,19 +68,13 @@ const clientUserId = computed(() => {
 });
 
 const getClientName = () => {
-  return props.dialog.name || 'Клиент';
-};
-
-// Загружаем участников диалога
-const loadDialogMembers = async () => {
-  try {
-    const response = await getDialogMembers(props.dialog.dialogId);
-    if (response.success) {
-      dialogMembers.value = response.data || [];
-    }
-  } catch (error) {
-    console.error('Ошибка при загрузке участников диалога:', error);
-  }
+  // Пытаемся получить имя клиента из members
+  const members = props.dialog?.members || [];
+  const client = members.find(member => 
+    member.userId !== props.managerUserId && member.type !== 'bot'
+  );
+  
+  return client?.name || props.dialog?.name || 'Клиент';
 };
 
 const isOwnMessage = (message) => {
@@ -156,14 +146,13 @@ const scrollToBottom = () => {
   });
 };
 
-// Прокручиваем вниз при изменении сообщений
-watch(() => props.messages, () => {
-  scrollToBottom();
-}, { deep: true });
+    // Прокручиваем вниз при изменении сообщений
+    watch(() => props.messages, () => {
+      scrollToBottom();
+    }, { deep: true, immediate: false });
 
 // Прокручиваем к полю ввода при монтировании и загружаем участников
 onMounted(() => {
-  loadDialogMembers();
   scrollToBottom();
 });
 </script>

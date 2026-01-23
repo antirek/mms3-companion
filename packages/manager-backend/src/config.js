@@ -29,4 +29,12 @@ export const config = {
   websocket: {
     port: parseInt(process.env.MANAGER_WEBSOCKET_PORT || '3004', 10),
   },
+  gigachat: {
+    clientId: process.env.GIGACHAT_CLIENT_ID || '',
+    clientSecret: process.env.GIGACHAT_CLIENT_SECRET || '',
+    model: process.env.GIGACHAT_MODEL || 'GigaChat-2-Max',
+    temperature: parseFloat(process.env.GIGACHAT_TEMPERATURE || '0.1'),
+    maxTokens: parseInt(process.env.GIGACHAT_MAX_TOKENS || '500', 10),
+    topP: parseFloat(process.env.GIGACHAT_TOP_P || '0.1'),
+  },
 };

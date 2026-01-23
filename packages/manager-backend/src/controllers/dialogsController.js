@@ -52,23 +52,3 @@ export async function getDialog(req, res) {
   }
 }
 
-export async function getDialogMembers(req, res) {
-  try {
-    const { chat3Client } = req.app.locals;
-    const { dialogId } = req.params;
-
-    const members = await chat3Client.getDialogMembers(dialogId);
-    const membersData = members?.data || members || [];
-
-    res.json({
-      success: true,
-      data: membersData
-    });
-  } catch (error) {
-    console.error('Ошибка при получении участников диалога:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || String(error)
-    });
-  }
-}

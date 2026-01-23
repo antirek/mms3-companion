@@ -14,12 +14,9 @@ export function useWebSocket(onMessage) {
     try {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.hostname}:3002/ws`;
-      
-      console.log('Подключение к WebSocket:', wsUrl);
       ws.value = new WebSocket(wsUrl);
 
       ws.value.onopen = () => {
-        console.log('WebSocket подключен');
         isConnected.value = true;
         reconnectAttempts.value = 0;
       };
@@ -27,16 +24,11 @@ export function useWebSocket(onMessage) {
       ws.value.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('Получено сообщение через WebSocket:', data);
-          
-          // Сохраняем WebSocket для отладки
-          window.__ws__ = ws.value;
-          
           if (onMessage) {
             onMessage(data);
           }
         } catch (error) {
-          console.error('Ошибка при парсинге сообщения WebSocket:', error);
+          console.error('WebSocket parse error:', error);
         }
       };
 
@@ -46,16 +38,10 @@ export function useWebSocket(onMessage) {
       };
 
       ws.value.onclose = () => {
-        console.log('WebSocket отключен');
         isConnected.value = false;
-        
-        // Попытка переподключения
         if (reconnectAttempts.value < maxReconnectAttempts) {
           reconnectAttempts.value++;
-          console.log(`Попытка переподключения ${reconnectAttempts.value}/${maxReconnectAttempts}...`);
           setTimeout(connect, reconnectDelay);
-        } else {
-          console.error('Достигнуто максимальное количество попыток переподключения');
         }
       };
     } catch (error) {

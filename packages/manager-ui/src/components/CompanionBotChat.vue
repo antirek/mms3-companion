@@ -5,7 +5,11 @@
       <span v-if="companionDialogId" class="dialog-id">{{ companionDialogId }}</span>
     </div>
     <div class="chat-messages" ref="messagesContainer">
-      <template v-for="(message, index) in messages" :key="message.messageId || message._id">
+      <div 
+        v-for="(message, index) in messages" 
+        :key="`msg-${message.messageId || message._id || index}`"
+        style="display: contents;"
+      >
         <!-- Разделитель перед сообщением клиента -->
         <div 
           v-if="isClientMessage(message) && shouldShowDivider(messages, index)"
@@ -38,26 +42,42 @@
         >
           <!-- Если это подсказка с рекомендацией и примерами -->
           <div v-if="isBotMessage(message) && isSuggestion(message) && parseSuggestion(message.content)" class="suggestion-content">
+            <!-- Секция 1: Сообщение клиента -->
+            <div v-if="parseSuggestion(message.content).clientMessage" class="client-message-section">
+              <div class="section-title">📩 Сообщение от клиента:</div>
+              <div class="client-message-text">{{ parseSuggestion(message.content).clientMessage }}</div>
+            </div>
+            
+            <!-- Секция 2: Рекомендация (всегда показываем) -->
             <div class="recommendation-section">
               <div class="section-title">💡 Рекомендация:</div>
-              <div class="recommendation-text">{{ parseSuggestion(message.content).recommendation }}</div>
+              <div class="recommendation-text">
+                {{ parseSuggestion(message.content).recommendation || 'нет рекомендации' }}
+              </div>
             </div>
-            <div v-if="parseSuggestion(message.content).examples && parseSuggestion(message.content).examples.length > 0" class="examples-section">
+            
+            <!-- Секция 3: Примеры ответов (всегда показываем) -->
+            <div class="examples-section">
               <div class="section-title">📝 Примеры ответов:</div>
-              <div 
-                v-for="(example, idx) in parseSuggestion(message.content).examples" 
-                :key="idx"
-                class="example-item"
-              >
-                <div class="example-number">{{ idx + 1 }}.</div>
-                <div class="example-text">{{ example }}</div>
-                <button 
-                  class="copy-button"
-                  @click="handleCopyExample(example)"
-                  :title="'Скопировать пример ' + (idx + 1)"
+              <div v-if="parseSuggestion(message.content).examples && parseSuggestion(message.content).examples.length > 0">
+                <div 
+                  v-for="(example, idx) in parseSuggestion(message.content).examples" 
+                  :key="idx"
+                  class="example-item"
                 >
-                  📋 Копировать
-                </button>
+                  <div class="example-number">{{ idx + 1 }}.</div>
+                  <div class="example-text">{{ example }}</div>
+                  <button 
+                    class="copy-button"
+                    @click="handleCopyExample(example)"
+                    :title="'Скопировать пример ' + (idx + 1)"
+                  >
+                    📋 Копировать
+                  </button>
+                </div>
+              </div>
+              <div v-else class="no-examples">
+                нет примеров
               </div>
             </div>
           </div>
@@ -65,7 +85,7 @@
           <div v-else class="message-content">{{ message.content }}</div>
           <div class="message-time">{{ formatTime(message.createdAt) }}</div>
         </div>
-      </template>
+      </div>
       <div v-if="messages.length === 0" class="empty">
         Подсказки от бота-компаньона появятся здесь
       </div>
@@ -84,7 +104,7 @@
 
 <script setup>
 import { ref, watch, nextTick, onMounted } from 'vue';
-import { sendMessage as sendMessageAPI } from '../api/companionBot.js';
+import { sendMessage as sendMessageAPI } from '../api/manager.js';
 
 const props = defineProps({
   clientDialogId: {
@@ -143,22 +163,24 @@ const formatTime = (timestamp) => {
 };
 
 const isBotMessage = (message) => {
-  // Сообщение от бота, если senderId не равен managerUserId
   return message.senderId !== props.managerUserId;
 };
 
 const isClientMessage = (message) => {
-  // Проверяем мета-тег или префикс сообщения
   return message.meta?.isClientMessage?.value === true || 
-         message.meta?.isClientMessage === true ||
-         (message.content && message.content.startsWith('📩 Сообщение от клиента'));
+         message.meta?.isClientMessage === true;
 };
 
 const isSuggestion = (message) => {
-  // Проверяем мета-тег или префикс сообщения
-  return message.meta?.isSuggestion?.value === true || 
+  // Проверяем мета-тег class=suggestion или префикс сообщения (для обратной совместимости)
+  return message.meta?.class?.value === 'suggestion' ||
+         message.meta?.class === 'suggestion' ||
+         message.meta?.isSuggestion?.value === true || 
          message.meta?.isSuggestion === true ||
-         (message.content && message.content.startsWith('💡 Подсказка для ответа клиенту'));
+         (message.content && (
+           message.content.startsWith('📩 Сообщение от клиента') ||
+           message.content.startsWith('💡 Подсказка для ответа клиенту')
+         ));
 };
 
 const formatClientMessage = (content) => {
@@ -200,35 +222,35 @@ const shouldShowDivider = (messages, index) => {
 };
 
 /**
- * Парсинг подсказки для извлечения рекомендации и примеров
+ * Парсинг подсказки для извлечения сообщения клиента, рекомендации и примеров
  * @param {string} content - Содержимое сообщения с подсказкой
- * @returns {Object|null} - Объект с recommendation и examples, или null если не удалось распарсить
+ * @returns {Object|null} - Объект с clientMessage, recommendation и examples, или null если не удалось распарсить
  */
 const parseSuggestion = (content) => {
   if (!content) return null;
   
-  // Убираем префикс "💡 Подсказка для ответа клиенту..."
-  let text = content.replace(/^💡 Подсказка для ответа клиенту[^:]+:\s*\n\n/, '');
-  text = text.replace(/^Подсказка для менеджера:\s*\n\n/, '');
+  let text = content;
   
-  // Ищем раздел РЕКОМЕНДАЦИЯ
-  const recommendationMatch = text.match(/\*\*РЕКОМЕНДАЦИЯ:\*\*\s*\n(.*?)(?=\*\*ПРИМЕРЫ|$)/s);
-  const recommendation = recommendationMatch 
-    ? recommendationMatch[1].trim() 
-    : null;
+  // Извлекаем сообщение клиента (секция 1)
+  const clientMessageMatch = text.match(/📩 Сообщение от клиента[^:]+:\s*\n(.*?)(?=\n\n💡|$)/s);
+  const clientMessage = clientMessageMatch ? clientMessageMatch[1].trim() : null;
   
-  // Ищем раздел ПРИМЕРЫ ОТВЕТОВ
-  const examplesMatch = text.match(/\*\*ПРИМЕРЫ ОТВЕТОВ:\*\*\s*\n(.*?)$/s);
+  // Извлекаем рекомендацию (секция 2)
+  const recommendationMatch = text.match(/💡 Рекомендация:\s*\n(.*?)(?=\n\n📝|$)/s);
+  const recommendation = recommendationMatch ? recommendationMatch[1].trim() : null;
+  
+  // Извлекаем примеры (секция 3)
+  const examplesMatch = text.match(/📝 Примеры ответов:\s*\n(.*?)$/s);
   let examples = [];
   
   if (examplesMatch) {
     const examplesText = examplesMatch[1];
-    // Ищем примеры в формате "1. [текст]" или "1. [текст]"
+    // Ищем примеры в формате "1. [текст]"
     const examplePattern = /^\d+\.\s*(.+?)(?=\n\d+\.|$)/gms;
     let match;
     while ((match = examplePattern.exec(examplesText)) !== null) {
       const exampleText = match[1].trim();
-      if (exampleText) {
+      if (exampleText && exampleText !== 'Примеры не найдены') {
         examples.push(exampleText);
       }
     }
@@ -237,21 +259,19 @@ const parseSuggestion = (content) => {
     if (examples.length === 0) {
       const lines = examplesText.split('\n').filter(line => line.trim());
       examples = lines
-        .filter(line => /^\d+\./.test(line.trim()))
+        .filter(line => /^\d+\./.test(line.trim()) && !line.includes('Примеры не найдены'))
         .map(line => line.replace(/^\d+\.\s*/, '').trim())
         .filter(line => line.length > 0);
     }
   }
   
-  // Если не нашли структурированный формат, возвращаем весь текст как рекомендацию
-  if (!recommendation && examples.length === 0) {
-    return {
-      recommendation: text.trim(),
-      examples: []
-    };
+  // Если не нашли структурированный формат, возвращаем null
+  if (!clientMessage && !recommendation && examples.length === 0) {
+    return null;
   }
   
   return {
+    clientMessage: clientMessage || null,
     recommendation: recommendation || '',
     examples: examples
   };
@@ -272,18 +292,19 @@ const handleCopyExample = (exampleText) => {
 };
 
 const handleSend = async () => {
-  if (!inputText.value.trim() || !props.companionDialogId) return;
+  if (!inputText.value.trim() || !props.companionDialogId) {
+    return;
+  }
   
   try {
     const response = await sendMessageAPI(props.companionDialogId, inputText.value);
     if (response.success) {
       inputText.value = '';
       emit('message-sent');
-      // Прокручиваем вниз после отправки сообщения
       scrollToBottom();
     }
   } catch (error) {
-    console.error('Ошибка при отправке сообщения:', error);
+    console.error('Error sending message:', error);
   }
 };
 
@@ -296,10 +317,10 @@ const scrollToBottom = () => {
   });
 };
 
-// Прокручиваем вниз при изменении сообщений
-watch(() => props.messages, () => {
-  scrollToBottom();
-}, { deep: true });
+    // Прокручиваем вниз при изменении сообщений
+    watch(() => props.messages, () => {
+      scrollToBottom();
+    }, { deep: true, immediate: false });
 
 // Прокручиваем вниз при монтировании компонента
 onMounted(() => {
@@ -421,10 +442,34 @@ onMounted(() => {
   width: 100%;
 }
 
+.client-message-section {
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px dashed #e0e0e0;
+}
+
+.client-message-text {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #666;
+  padding: 0.5rem;
+  background: #fff3e0;
+  border-radius: 4px;
+  border-left: 3px solid #ff9800;
+  font-style: italic;
+}
+
 .recommendation-section {
   margin-bottom: 1rem;
   padding-bottom: 0.75rem;
   border-bottom: 1px dashed #e0e0e0;
+}
+
+.no-examples {
+  font-style: italic;
+  color: #999;
+  padding: 0.5rem;
+  text-align: center;
 }
 
 .section-title {
