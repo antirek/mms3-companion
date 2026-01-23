@@ -41,11 +41,11 @@ export class CompanionBotService {
   /**
    * Получить или создать диалог с ботом-компаньоном для диалога с клиентом
    * @param {string} clientDialogId - ID диалога с клиентом
-   * @param {string} clientUserId - ID клиента
-   * @param {string} clientName - Имя клиента
+   * @param {string} clientUserId - ID клиента (опционально, будет определен автоматически)
+   * @param {string} clientName - Имя клиента (опционально, будет определено автоматически)
    * @returns {Promise<Object>}
    */
-  async getOrCreateCompanionDialog(clientDialogId, clientUserId, clientName) {
+  async getOrCreateCompanionDialog(clientDialogId, clientUserId = null, clientName = null) {
     try {
       if (!this.chat3Client) {
         throw new Error('Chat3Client не установлен');
@@ -53,6 +53,31 @@ export class CompanionBotService {
 
       const managerUserId = config.manager.userId;
       const companionBotUserId = config.companionBot.userId;
+      
+      // Если clientUserId или clientName не переданы, получаем полную информацию о диалоге
+      if (!clientUserId || !clientName) {
+        console.log(`[COMPANION-BOT] Получение информации о диалоге ${clientDialogId} для определения клиента...`);
+        const dialogResult = await this.chat3Client.getDialog(clientDialogId);
+        const dialogData = dialogResult?.data || dialogResult;
+        
+        if (dialogData) {
+          const members = dialogData.members || [];
+          const client = members.find(member => 
+            member.userId !== managerUserId && member.type !== 'bot'
+          );
+          
+          if (client) {
+            clientUserId = clientUserId || client.userId;
+            clientName = clientName || client.name || client.userId;
+            console.log(`[COMPANION-BOT] Определен клиент: ${clientUserId} (${clientName})`);
+          } else {
+            console.warn(`[COMPANION-BOT] ⚠️ Диалог ${clientDialogId} не содержит клиента среди участников`);
+            // Используем fallback значения
+            clientUserId = clientUserId || 'unknown_client';
+            clientName = clientName || 'Unknown Client';
+          }
+        }
+      }
 
       // Сначала проверяем мета-тег диалога с контактом на наличие ID диалога бота
       const companionDialogIdMeta = await this.metaManager.getDialogMetaKey(clientDialogId, 'companionBotDialogId');
@@ -131,7 +156,16 @@ export class CompanionBotService {
       }
 
       // Создаем диалог
-      const newDialog = await this.chat3Client.createDialog({
+      console.log(`[COMPANION-BOT] Попытка создать диалог с параметрами:`, {
+        name: `Бот-компаньон: ${clientName}`,
+        createdBy: managerUserId,
+        membersCount: 2,
+        clientDialogId,
+        clientUserId,
+        clientName
+      });
+      
+      const dialogResult = await this.chat3Client.createDialog({
         name: `Бот-компаньон: ${clientName}`,
         createdBy: managerUserId,
         members: [
@@ -154,15 +188,34 @@ export class CompanionBotService {
         }
       });
 
-      const companionDialogId = newDialog.dialogId || newDialog._id || newDialog.id;
-      console.log(`Диалог с ботом-компаньоном создан: ${companionDialogId}`);
+      // Извлекаем диалог из результата (может быть в data или напрямую)
+      const newDialog = dialogResult?.data || dialogResult;
+
+      console.log(`[COMPANION-BOT] Результат создания диалога:`, {
+        hasResult: !!dialogResult,
+        hasData: !!dialogResult?.data,
+        hasDialog: !!newDialog,
+        dialogId: newDialog?.dialogId || newDialog?._id || newDialog?.id,
+        resultKeys: dialogResult ? Object.keys(dialogResult) : [],
+        dialogKeys: newDialog ? Object.keys(newDialog) : []
+      });
+
+      const companionDialogId = newDialog?.dialogId || newDialog?._id || newDialog?.id;
+      if (!companionDialogId) {
+        console.error(`[COMPANION-BOT] ❌ Не удалось получить ID созданного диалога. Структура результата:`, JSON.stringify(dialogResult, null, 2));
+        throw new Error('Не удалось получить ID созданного диалога');
+      }
+      
+      console.log(`[COMPANION-BOT] ✅ Диалог с ботом-компаньоном создан: ${companionDialogId} для клиентского диалога ${clientDialogId}`);
       
       // Сохраняем ID созданного диалога бота в мета-тег диалога с контактом
+      console.log(`[COMPANION-BOT] Сохранение мета-тега companionBotDialogId для диалога ${clientDialogId}...`);
       const metaResult = await this.metaManager.setDialogMetaKey(clientDialogId, 'companionBotDialogId', companionDialogId);
       if (metaResult.success) {
-        console.log(`ID диалога бота сохранен в мета-тег диалога с контактом: ${companionDialogId}`);
+        console.log(`[COMPANION-BOT] ✅ ID диалога бота сохранен в мета-тег диалога с контактом: ${companionDialogId}`);
       } else {
-        console.error(`Ошибка при сохранении мета-тега companionBotDialogId: ${metaResult.error}`);
+        console.error(`[COMPANION-BOT] ❌ Ошибка при сохранении мета-тега companionBotDialogId для ${clientDialogId}:`, metaResult.error);
+        // Не бросаем ошибку, чтобы не прерывать процесс, но логируем
       }
       
       return { success: true, dialog: newDialog, created: true };

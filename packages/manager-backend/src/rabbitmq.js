@@ -349,18 +349,67 @@ export class RabbitMQUpdatesClient {
       const fileIds = await this.fileService.getAllUploadedFileIds();
       console.log(`📎 Используется ${fileIds.length} файлов для контекста`);
 
-      // Генерируем рекомендацию через GigaChat
+      // Генерируем рекомендацию через GigaChat с повторными попытками
       console.log(`🤖 Генерация рекомендации для ответа клиенту...`);
-      const suggestionResult = await this.gigachatService.generateSuggestion(
-        clientMessageContent,
-        contextMessages,
-        fileIds,
-        clientName,
-        config.manager.userId
-      );
+      
+      let suggestionResult = null;
+      const maxRetries = 3;
+      const retryDelay = 2000; // 2 секунды
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          suggestionResult = await this.gigachatService.generateSuggestion(
+            clientMessageContent,
+            contextMessages,
+            fileIds,
+            clientName,
+            config.manager.userId
+          );
 
-      if (!suggestionResult.success) {
-        console.error('Не удалось сгенерировать рекомендацию:', suggestionResult.error);
+          if (suggestionResult.success) {
+            if (attempt > 1) {
+              console.log(`✅ Рекомендация успешно сгенерирована с попытки ${attempt}`);
+            }
+            break;
+          }
+
+          // Проверяем, является ли ошибка временной (504, 502, 503, timeout)
+          const errorMessage = suggestionResult.error?.message || String(suggestionResult.error || '');
+          const statusCode = suggestionResult.error?.response?.status || suggestionResult.error?.status;
+          const isTemporaryError = statusCode === 504 || statusCode === 502 || statusCode === 503 || 
+                                  errorMessage.includes('timeout') || errorMessage.includes('Gateway Time-out');
+
+          if (isTemporaryError && attempt < maxRetries) {
+            console.warn(`⚠️ Временная ошибка при генерации рекомендации (попытка ${attempt}/${maxRetries}):`, {
+              statusCode,
+              error: errorMessage
+            });
+            console.log(`🔄 Повторная попытка через ${retryDelay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            continue;
+          } else {
+            console.error(`❌ Не удалось сгенерировать рекомендацию после ${attempt} попыток:`, suggestionResult.error);
+            return;
+          }
+        } catch (error) {
+          const statusCode = error?.response?.status || error?.status;
+          const isTemporaryError = statusCode === 504 || statusCode === 502 || statusCode === 503 || 
+                                  error.message?.includes('timeout') || error.message?.includes('Gateway Time-out');
+
+          if (isTemporaryError && attempt < maxRetries) {
+            console.warn(`⚠️ Исключение при генерации рекомендации (попытка ${attempt}/${maxRetries}):`, error.message);
+            console.log(`🔄 Повторная попытка через ${retryDelay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            continue;
+          } else {
+            console.error(`❌ Критическая ошибка при генерации рекомендации после ${attempt} попыток:`, error);
+            return;
+          }
+        }
+      }
+
+      if (!suggestionResult || !suggestionResult.success) {
+        console.error('❌ Не удалось сгенерировать рекомендацию после всех попыток');
         return;
       }
 

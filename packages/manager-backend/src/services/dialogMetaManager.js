@@ -62,26 +62,27 @@ export class DialogMetaManager {
    * @param {string} dialogId - ID диалога
    * @param {string} key - Ключ мета тега
    * @param {any} value - Значение мета тега
+   * @param {Object} options - Опции (dataType, scope)
    * @returns {Promise<Object>}
    */
-  async setDialogMetaKey(dialogId, key, value) {
+  async setDialogMetaKey(dialogId, key, value, options = {}) {
     try {
       if (!this.chat3Client) {
         throw new Error('Chat3Client не установлен');
       }
 
-      // Получаем текущие мета теги
-      const currentMeta = await this.getDialogMeta(dialogId);
-      const meta = currentMeta.success ? (currentMeta.data || {}) : {};
+      // Используем метод setMeta из chat3-client
+      // PUT /api/meta/dialog/:dialogId/:key
+      // Согласно документации, всегда отправляем объект с полем value
+      const metaValue = {
+        value: value,
+        ...(options.dataType && { dataType: options.dataType }),
+        ...(options.scope && { scope: options.scope }),
+      };
 
-      // Обновляем нужный ключ
-      meta[key] = value;
+      const response = await this.chat3Client.setMeta('dialog', dialogId, key, metaValue);
 
-      // Сохраняем обновленные мета теги
-      // PUT /api/meta/dialog/:dialogId
-      await this.chat3Client.setMeta('dialog', dialogId, meta);
-
-      return { success: true };
+      return { success: true, data: response?.data || response };
     } catch (error) {
       console.error(`Ошибка при установке мета тега ${key} диалога ${dialogId}:`, error.message || error);
       return { success: false, error: error.message || String(error) };
